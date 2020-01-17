@@ -1,0 +1,7 @@
+target
+.vscode
+**/dist
+.editorconfig
+**/.gitignore
+**/.nsprc
+**/README.md

@@ -1,0 +1,53 @@
+image: docker:latest
+services:
+- docker:dind
+
+stages:
+- compile
+- image
+
+before_script:
+  - env
+  - pwd
+  - ls -lah
+
+compile:
+  image: rust:1.34.0-stretch
+  stage: compile
+  script:
+     - export CARGO_HOME=`pwd`/usr/local/cargo
+     - export RUSTUP_HOME=`pwd`/usr/local/rustup
+     - export PATH=$CARGO_HOME/bin:$RUSTUP_HOME/bin:$PATH
+     - mkdir -p $CARGO_HOME $RUSTUP_HOME
+     - rustup default nightly
+     - which cargo
+     - cargo test --locked
+     - cargo build --locked --release
+     - mkdir -p bin
+     - mv target/release/daemon target/release/management target/release/serve bin
+     - ls -lah bin
+  artifacts:
+    paths:
+    - bin/daemon
+    - bin/management
+    - bin/serve
+    expire_in: 1 week
+  cache:
+    paths:
+      - target
+      - usr/local/cargo
+
+.template:image:
+  stage: image
+  script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - docker build --tag $IMAGE_NAME --file $DOCKERFILE .
+    - docker push $IMAGE_NAME
+  dependencies:
+    - compile
+
+mqs:image:
+  extends: .template:image
+  variables:
+    IMAGE_NAME: $CI_REGISTRY_IMAGE/mqs:$CI_COMMIT_REF_NAME
+    DOCKERFILE: Dockerfile.mqs
