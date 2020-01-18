@@ -5,6 +5,7 @@ extern crate jsonwebtoken;
 extern crate base64;
 extern crate regex;
 extern crate chrono;
+extern crate time;
 extern crate rand;
 
 #[macro_use] extern crate log;

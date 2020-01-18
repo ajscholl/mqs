@@ -15,6 +15,7 @@ X-MQS-DEAD-LETTER-QUEUE: <deadLetterQueueName, string, optional>
 X-MQS-RETENTION-SECONDS: <retentionSeconds, number, required>
 X-MQS-VISIBILITY-TIMEOUT-SECONDS: <visibilityTimeoutSeconds, number, required>
 X-MQS-DELAY-SECONDS: <delaySeconds, number, optional>
+X-MQS-CONTENT-BASED-DEDUPLICATION: <contentBasedDeduplication, bool, required>
 ```
 
 Function:

@@ -53,5 +53,6 @@ fn main() {
     rocket::custom(config)
         .manage(init_pool())
         .mount("/", routes![health::health])
+        .mount("/", routes![queues::new_queue])
         .launch();
 }

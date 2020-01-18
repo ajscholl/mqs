@@ -73,6 +73,9 @@ version = "1.0.39"
 [dependencies.tempfile]
 version = "3.1.0"
 
+[dependencies.time]
+version = "0.1.42"
+
 [dependencies.uuid]
 version = "0.6.5"
 features = ["serde", "v4"]

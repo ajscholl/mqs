@@ -2,6 +2,7 @@ table! {
     messages (id) {
         id -> Uuid,
         payload -> Text,
+        content_type -> Varchar,
         hash -> Nullable<Varchar>,
         queue -> Varchar,
         receives -> Int4,
