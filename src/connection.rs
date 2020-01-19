@@ -28,7 +28,7 @@ fn pool_size() -> u32 {
     size.parse::<u32>().expect("POOL_SIZE must be an integer")
 }
 
-impl<'a, 'r> FromRequest<'a, 'r> for DbConn {
+impl <'a, 'r> FromRequest<'a, 'r> for DbConn {
     type Error = ();
 
     fn from_request(request: &'a Request<'r>) -> Outcome<DbConn, Self::Error> {

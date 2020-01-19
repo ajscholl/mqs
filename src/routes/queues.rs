@@ -16,6 +16,7 @@ pub struct CreateQueueParams {
     content_based_deduplication: bool,
 }
 
+#[derive(Debug)]
 pub enum CreateQueueGuard {
     Params(CreateQueueParams),
     Error(&'static str),

@@ -29,6 +29,7 @@ impl ErrorResponder {
     }
 }
 
+#[derive(Debug)]
 pub struct StatusResponder {
     status: Status,
 }
@@ -41,7 +42,7 @@ impl StatusResponder {
     }
 }
 
-impl<'r> Responder<'r> for StatusResponder {
+impl <'r> Responder<'r> for StatusResponder {
     fn respond_to(self, _req: &Request) -> response::Result<'r> {
         Response::build().status(self.status).ok()
     }

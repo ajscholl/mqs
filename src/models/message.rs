@@ -168,7 +168,7 @@ impl Message {
             ))
             .filter(In::new(
                 messages::id,
-                MessageIdsForFetch::new(&queue.name, visible_since.naive_utc(), count),
+                MessageIdsForFetch::new(&queue.name, now.naive_utc(), count),
             ))
             .returning(messages::all_columns);
 
