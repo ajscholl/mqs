@@ -54,5 +54,8 @@ fn main() {
         .manage(init_pool())
         .mount("/", routes![health::health])
         .mount("/", routes![queues::new_queue])
+        .mount("/", routes![messages::publish_messages])
+//        .mount("/", routes![messages::get_messages])
+        .mount("/", routes![messages::delete_message])
         .launch();
 }

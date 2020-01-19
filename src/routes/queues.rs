@@ -4,18 +4,7 @@ use rocket::http::Status;
 
 use crate::connection::DbConn;
 use crate::models::queue::{NewQueue, QueueInput};
-use rocket_contrib::json::Json;
-
-#[derive(Serialize, Debug)]
-pub struct ErrorResponse {
-    error: &'static str,
-}
-
-#[derive(Responder, Debug)]
-#[response(status = 400, content_type = "json")]
-pub struct ErrorResponder {
-    response: Json<ErrorResponse>,
-}
+use crate::routes::{ErrorResponder, StatusResponder};
 
 #[derive(Debug)]
 pub struct CreateQueueParams {
@@ -93,14 +82,11 @@ impl <'a, 'r> FromRequest<'a, 'r> for CreateQueueGuard {
 }
 
 #[put("/queues/<queue_name>")]
-pub fn new_queue(conn: DbConn, queue_name: String, params: CreateQueueGuard) -> Result<Status, ErrorResponder> {
+pub fn new_queue(conn: DbConn, queue_name: String, params: CreateQueueGuard) -> Result<StatusResponder, ErrorResponder> {
     match params {
-        CreateQueueGuard::Error(err) => Err(ErrorResponder {
-            response: Json(ErrorResponse {
-                error: err,
-            }),
-        }),
+        CreateQueueGuard::Error(err) => Err(ErrorResponder::new(err)),
         CreateQueueGuard::Params(queue_params) => {
+            info!("Creating new queue {}", &queue_name);
             let created = NewQueue::insert(&conn, &QueueInput {
                 name: &queue_name,
                 max_receives: queue_params.max_receives,
@@ -112,11 +98,17 @@ pub fn new_queue(conn: DbConn, queue_name: String, params: CreateQueueGuard) -> 
             });
 
             Ok(match created {
-                Ok(true) => Status::Created,
-                Ok(false) => Status::Conflict,
+                Ok(true) => {
+                    info!("Created new queue {}", &queue_name);
+                    StatusResponder::new(Status::Created)
+                },
+                Ok(false) => {
+                    info!("Queue {} did already exist", &queue_name);
+                    StatusResponder::new(Status::Conflict)
+                },
                 Err(err) => {
                     error!("Failed to create new queue {}, {:?}: {}", queue_name, queue_params, err);
-                    Status::InternalServerError
+                    StatusResponder::new(Status::InternalServerError)
                 }
             })
         }

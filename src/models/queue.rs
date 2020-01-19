@@ -94,3 +94,12 @@ impl <'a> NewQueue<'a> {
         }
     }
 }
+
+impl Queue {
+    pub fn find_by_name(conn: &PgConnection, name: &str) -> QueryResult<Option<Queue>> {
+        queues::table
+            .filter(queues::name.eq(name))
+            .first::<Queue>(conn)
+            .optional()
+    }
+}

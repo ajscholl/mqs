@@ -186,8 +186,7 @@ Responses:
 
 ## Operations on messages
 
-You can choose to either operate on single messages or send and receive messages in batch. If you use the batch mode, the server will expect multipart requests and return multipart responses instead of sending the message for example as a simple response body.
-
+For now we only support handling a single message at a time. While batch operations might provide higher throughput, we value simplicity over performance for now. If you need high performance, a managed service like SQS or something more complex and scalable like RabbitMQ might be an alternative for you.
 ### Sending a message to a queue
 
 ```http
@@ -199,48 +198,16 @@ Content-Type: "application/json; charset=utf-8"
 }
 ```
 
-```http
-POST /messages/<queueName>
-Content-type: multipart/mixed; boundary="simple boundary"
-
---simple boundary
-Content-Type: "application/json; charset=utf-8"
-
-{
-    "message": "data"
-}
---simple boundary
-Content-type: text/plain; charset=us-ascii
-
-Another simple message.
---simple boundary--
-```
-
-### Receiving messages from a queue
-
-```http
-GET /messages/<queueName>
-X-MQS-MAX-MESSAGES: <maxMessages, number, required>
-X-MQS-WAIT-TIME: <waitTime, number, optional>
-```
-
 Function:
 
 ```haskell
 if not exists queueName
     return 404
-if maxMessages < 1 or maxMessages > 1000
-    return 400
-if set waitTime and (waitTime < 0 or waitTime > 60)
-    return 400
-messages = fetchMessages(...)
-if messages.length > 0
-    return 200, messages
-if not set waitTime or waitTime = 0
-    return 200, []
-notifyWait queueLock up to waitTime
-messages = fetchMessages(...)
-    return 200, messages
+exists = publishMessage(...)
+if exists
+    return 200
+else
+    return 201
 
 catch error
     return 500
@@ -248,8 +215,35 @@ catch error
 
 Responses:
 
-- `200 OK` - Up to maxMessages were received. There might be less messages or no at all.
-- `400 Bad Request` - One or multiple parameters did not validate. Body contains an error response.
+- `200 OK` - The message did already exist in the queue, no action has been performed.
+- `201 Created` - The message was successfully published to the queue.
+- `404 Not Found` - The specified queue doesn't exist.
+- `500 Internal Server Error` - The server hit an unexpected error condition and can not continue.
+
+### Receiving messages from a queue
+
+```http
+GET /messages/<queueName>
+```
+
+Function:
+
+```haskell
+if not exists queueName
+    return 404
+message = fetchMessage(...)
+if messages is some
+    return 200, message
+return 204
+
+catch error
+    return 500
+```
+
+Responses:
+
+- `200 OK` - A message was found and is returned in the response. The header `X-MQS-MESSAGE-ID` contains the id of the message.
+- `204 No Content` - No message was found, try again after some time or publishing a message.
 - `404 Not Found` - The specified queue doesn't exist.
 - `500 Internal Server Error` - The server hit an unexpected error condition and can not continue.
 
@@ -262,6 +256,8 @@ DELETE /messages/<messageId>
 Function:
 
 ```haskell
+if not isUuid(messageId)
+    return 400
 exists = deleteMessage(messageId)
 if exists
     return 204
@@ -274,5 +270,6 @@ catch error
 Responses:
 
 - `204 No Content` - The message was deleted and will no longer be returned.
+- `400 Bad Request` - The specified message id is not a valid uuid.
 - `404 Not Found` - The specified message does not exist  (you might want to treat this as success if you only wanted to assert the non-existence of a message).
 - `500 Internal Server Error` - The server hit an unexpected error condition and can not continue.
