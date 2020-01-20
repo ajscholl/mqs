@@ -102,4 +102,10 @@ impl Queue {
             .first::<Queue>(conn)
             .optional()
     }
+
+    pub fn delete_by_name(conn: &PgConnection, name: &str) -> QueryResult<bool> {
+        diesel::dsl::delete(queues::table.filter(queues::name.eq(name)))
+            .execute(conn)
+            .map(|count| count > 0)
+    }
 }

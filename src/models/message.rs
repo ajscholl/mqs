@@ -172,11 +172,61 @@ impl Message {
             ))
             .returning(messages::all_columns);
 
-        return update_query.get_results(conn);
+        let messages: Vec<Message> = update_query.get_results(conn)?;
+
+        // filter result, move messages to dead letter queues
+        let mut result = Vec::new();
+        let mut move_to_dead_letter_queue = Vec::new();
+        let mut to_delete = Vec::new();
+        result.reserve_exact(messages.len());
+        for message in messages {
+            let created_at = DateTime::from_utc(message.created_at, Utc);
+            if add_pg_interval(&created_at, &queue.retention_timeout) < now {
+                to_delete.push(message.id);
+                continue;
+            }
+            if let Some(max_receives) = queue.max_receives {
+                if message.receives >= max_receives {
+                    // send to dead letter queue
+                    move_to_dead_letter_queue.push(message.id);
+                    // do not put a continue statement here, we still want to return this message
+                    // to the caller. So we send a message directly to the dead-letter-queue upon receive,
+                    // but we still allow the caller to process it. It will appear in the dead-letter-queue
+                    // after the visibility timeout and the caller will still be able to delete it via
+                    // its id regardless of the queue the message is in
+                }
+            }
+            result.push(message);
+        }
+        if !to_delete.is_empty() {
+            Message::delete_by_ids(&conn, to_delete)?;
+        }
+        if let Some(dead_letter_queue) = &queue.dead_letter_queue {
+            if !move_to_dead_letter_queue.is_empty() {
+                Message::move_to_queue(&conn, move_to_dead_letter_queue, dead_letter_queue)?;
+            }
+        }
+        return Ok(result);
+    }
+
+    pub fn move_to_queue(conn: &PgConnection, ids: Vec<Uuid>, new_queue: &str) -> QueryResult<usize> {
+        diesel::dsl::update(messages::table)
+            .set((
+                     messages::queue.eq(new_queue),
+                     messages::receives.eq(0),
+            ))
+            .filter(messages::id.eq_any(ids))
+            .execute(conn)
     }
 
     pub fn delete_by_id(conn: &PgConnection, id: Uuid) -> QueryResult<bool> {
         diesel::delete(messages::table.filter(messages::id.eq(id)))
-            .execute(conn).map(|count| count > 0)
+            .execute(conn)
+            .map(|count| count > 0)
+    }
+
+    pub fn delete_by_ids(conn: &PgConnection, ids: Vec<Uuid>) -> QueryResult<usize> {
+        diesel::delete(messages::table.filter(messages::id.eq_any(ids)))
+            .execute(conn)
     }
 }

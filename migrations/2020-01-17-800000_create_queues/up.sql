@@ -37,3 +37,22 @@ CREATE INDEX IF NOT EXISTS queues_updated_at_idx ON queues (updated_at);
 
 CREATE INDEX IF NOT EXISTS messages_created_at_idx ON messages (created_at);
 CREATE INDEX IF NOT EXISTS messages_queue_created_at_idx ON messages (queue, created_at);
+
+CREATE OR REPLACE FUNCTION clear_max_receives() RETURNS trigger AS $$
+BEGIN
+    IF (
+        NEW IS DISTINCT FROM OLD AND
+        NEW.max_receives IS NOT NULL AND
+        NEW.dead_letter_queue IS NULL
+    ) THEN
+        NEW.max_receives := NULL;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER queues_clear_max_receives_on_insert BEFORE INSERT ON queues
+    FOR EACH ROW EXECUTE PROCEDURE clear_max_receives();
+
+CREATE TRIGGER queues_clear_max_receives_on_update BEFORE UPDATE ON queues
+    FOR EACH ROW EXECUTE PROCEDURE clear_max_receives();

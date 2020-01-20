@@ -1,3 +1,8 @@
+DROP TRIGGER IF EXISTS queues_clear_max_receives_on_insert ON queues;
+DROP TRIGGER IF EXISTS queues_clear_max_receives_on_update ON queues;
+
+DROP FUNCTION IF EXISTS clear_max_receives();
+
 DROP TRIGGER IF EXISTS set_updated_at ON queues;
 
 DROP INDEX IF EXISTS messages_queue_visible_since_idx;

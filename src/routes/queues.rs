@@ -3,7 +3,7 @@ use rocket::Request;
 use rocket::http::Status;
 
 use crate::connection::DbConn;
-use crate::models::queue::{NewQueue, QueueInput};
+use crate::models::queue::{NewQueue, QueueInput, Queue};
 use crate::routes::{ErrorResponder, StatusResponder};
 
 #[derive(Debug)]
@@ -113,5 +113,25 @@ pub fn new_queue(conn: DbConn, queue_name: String, params: CreateQueueGuard) -> 
                 }
             })
         }
+    }
+}
+
+#[delete("/queues/<queue_name>")]
+pub fn delete_queue(conn: DbConn, queue_name: String) -> StatusResponder {
+    info!("Deleting queue {}", &queue_name);
+    let deleted = Queue::delete_by_name(&conn, &queue_name);
+    match deleted {
+        Ok(true) => {
+            info!("Deleted queue {}", &queue_name);
+            StatusResponder::new(Status::Ok)
+        },
+        Ok(false) => {
+            info!("Message {} was not found", &queue_name);
+            StatusResponder::new(Status::NotFound)
+        },
+        Err(err) => {
+            error!("Failed to delete queue {}: {}", &queue_name, err);
+            StatusResponder::new(Status::InternalServerError)
+        },
     }
 }

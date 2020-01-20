@@ -4,7 +4,7 @@
 
 ## Operations on queues
 
-mqs exposes an hTTP interface as its API. Each operation is given with a rough specification of the request format, its function in pseudo-code, and a list of possible response codes and their meaning.
+mqs exposes an HTTP interface as its API. Each operation is given with a rough specification of the request format, its function in pseudo-code, and a list of possible response codes and their meaning.
 
 ### Create a new queue
 
@@ -95,7 +95,6 @@ Responses:
 
 ```http
 DELETE /queues/<queueName, string>
-X-MQS-CASCADE: <cascade, true | false, default true>
 ```
 
 Function:
@@ -104,11 +103,8 @@ Function:
 if not exists queueName
     return 404
 if any queue has queueName as deadLetterQueue
-    if not cascade
-        return 412
     update queue set deadLetterQueue = None, maxReceives = None
-deleteQueue(...)
-deleteMessages(...)
+deleteQueueAndMessages(...)
 return 200
 
 catch error
@@ -118,9 +114,7 @@ catch error
 Responses:
 
 - `200 OK` - The queue was successfully deleted and can no longer be used.
-- `400 Bad Request` - One or multiple parameters did not validate. Body contains an error response.
 - `404 Not Found` - The specified queue doesn't exist (you might want to treat this as success if you only wanted to assert the non-existence of a queue).
-- `412 Precondition Failed` - A queue uses the given queue as a dead letter queue.
 - `500 Internal Server Error` - The server hit an unexpected error condition and can not continue.
 
 ### Listing all queues
@@ -187,6 +181,7 @@ Responses:
 ## Operations on messages
 
 For now we only support handling a single message at a time. While batch operations might provide higher throughput, we value simplicity over performance for now. If you need high performance, a managed service like SQS or something more complex and scalable like RabbitMQ might be an alternative for you.
+
 ### Sending a message to a queue
 
 ```http
