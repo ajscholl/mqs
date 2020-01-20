@@ -184,6 +184,9 @@ For now we only support handling a single message at a time. While batch operati
 
 ### Sending a message to a queue
 
+Note: To avoid loading too large messages into memory, the size of a message is limited to 1 MB.
+If you send more data, it is ignored and cut off after the limit.
+
 ```http
 POST /messages/<queueName>
 Content-Type: "application/json; charset=utf-8"
@@ -198,7 +201,7 @@ Function:
 ```haskell
 if not exists queueName
     return 404
-exists = publishMessage(...)
+exists = publishMessage(contentType, body.take(1MB))
 if exists
     return 200
 else

@@ -19,18 +19,16 @@ compile:
      - export RUSTUP_HOME=`pwd`/usr/local/rustup
      - export PATH=$CARGO_HOME/bin:$RUSTUP_HOME/bin:$PATH
      - mkdir -p $CARGO_HOME $RUSTUP_HOME
-     - rustup default nightly
+     - rustup default nightly-2019-12-16
      - which cargo
      - cargo test --locked
      - cargo build --locked --release
      - mkdir -p bin
-     - mv target/release/daemon target/release/management target/release/serve bin
+     - mv target/release/mqs bin
      - ls -lah bin
   artifacts:
     paths:
-    - bin/daemon
-    - bin/management
-    - bin/serve
+    - bin/mqs
     expire_in: 1 week
   cache:
     paths:

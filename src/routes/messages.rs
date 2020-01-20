@@ -1,14 +1,16 @@
 use rocket::http::{Header, Status};
-use rocket::{response, Request, Response};
+use rocket::{response, Request, Response, Data};
 use rocket::request::{FromRequest, Outcome};
 use rocket::response::Responder;
 use uuid::Uuid;
-use std::io::Cursor;
+use std::io::{Cursor, Read};
 
 use crate::connection::DbConn;
 use crate::models::message::{Message, NewMessage, MessageInput};
 use crate::routes::{ErrorResponder, StatusResponder};
 use crate::models::queue::Queue;
+
+const MAX_MESSAGE_SIZE: u64 = 1024 * 1024;
 
 #[derive(Debug)]
 pub struct MessageContentType {
@@ -27,7 +29,7 @@ impl <'a, 'r> FromRequest<'a, 'r> for MessageContentType {
 }
 
 #[post("/messages/<queue_name>", data = "<message>")]
-pub fn publish_message(conn: DbConn, queue_name: String, message: String, content_type: MessageContentType) -> StatusResponder {
+pub fn publish_message(conn: DbConn, queue_name: String, message: Data, content_type: MessageContentType) -> StatusResponder {
     match Queue::find_by_name(&conn, &queue_name) {
         Err(err) => {
             error!("Failed to find queue {} for new message: {}", &queue_name, err);
@@ -38,22 +40,31 @@ pub fn publish_message(conn: DbConn, queue_name: String, message: String, conten
             StatusResponder::new(Status::NotFound)
         },
         Ok(Some(queue)) => {
-            info!("Inserting new message into queue {}", &queue_name);
-            match NewMessage::insert(&conn, &queue, &MessageInput {
-                content_type: &content_type.content_type,
-                payload: &message,
-            }) {
+            let mut message_content = String::new();
+            match message.open().take(MAX_MESSAGE_SIZE).read_to_string(&mut message_content) {
                 Err(err) => {
-                    error!("Failed to insert new message into queue {}: {}", &queue_name, err);
+                    error!("Failed to read message body into string: {}", err);
                     StatusResponder::new(Status::InternalServerError)
                 },
-                Ok(true) => {
-                    debug!("Published new message into queue {}", &queue_name);
-                    StatusResponder::new(Status::Created)
-                },
-                Ok(false) => {
-                    debug!("New message already exists in queue {}", &queue_name);
-                    StatusResponder::new(Status::Ok)
+                Ok(_) => {
+                    info!("Inserting new message into queue {}", &queue_name);
+                    match NewMessage::insert(&conn, &queue, &MessageInput {
+                        content_type: &content_type.content_type,
+                        payload: &message_content,
+                    }) {
+                        Err(err) => {
+                            error!("Failed to insert new message into queue {}: {}", &queue_name, err);
+                            StatusResponder::new(Status::InternalServerError)
+                        },
+                        Ok(true) => {
+                            debug!("Published new message into queue {}", &queue_name);
+                            StatusResponder::new(Status::Created)
+                        },
+                        Ok(false) => {
+                            debug!("New message already exists in queue {}", &queue_name);
+                            StatusResponder::new(Status::Ok)
+                        },
+                    }
                 },
             }
         },
