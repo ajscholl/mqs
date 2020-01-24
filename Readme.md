@@ -4,36 +4,64 @@
 
 ## Operations on queues
 
-mqs exposes an HTTP interface as its API. Each operation is given with a rough specification of the request format, its function in pseudo-code, and a list of possible response codes and their meaning.
+mqs exposes an HTTP interface as its API.
+Each operation is given with a rough specification of the request format, its function in pseudo-code, and a list of possible response codes and their meaning.
+If an interval is given or expected, it is always expressed in seconds.
+Changing attributes of queues might not affect messages already existing in the queue - for example, turning on message deduplication will not consider messages already in the queue when checking for duplicates.
+On the other hand, a message does not remember its redrive policy, these settings are applied on message receive. 
 
 ### Create a new queue
 
 ```http
-PUT /queues/<queueName, string>
-X-MQS-MAX-RECEIVES: <maxReceives, number, optional>
-X-MQS-DEAD-LETTER-QUEUE: <deadLetterQueueName, string, optional>
-X-MQS-RETENTION-SECONDS: <retentionSeconds, number, required>
-X-MQS-VISIBILITY-TIMEOUT-SECONDS: <visibilityTimeoutSeconds, number, required>
-X-MQS-DELAY-SECONDS: <delaySeconds, number, optional>
-X-MQS-CONTENT-BASED-DEDUPLICATION: <contentBasedDeduplication, bool, required>
+PUT /queues/<queue_name, string>
+Content-Type: application/json
+
+{
+    "redrive_policy": {
+        "max_receives": number,
+        "dead_letter_queue": string
+    } | null,
+    "retention_timeout": number,
+    "visibility_timeout": number,
+    "message_delay": number,
+    "message_deduplication": bool
+}
+```
+
+Response:
+
+```http
+Content-Type: application/json
+
+{
+    "name": string,
+    "redrive_policy": {
+        "max_receives": number,
+        "dead_letter_queue": string
+    } | null,
+    "retention_timeout": number,
+    "visibility_timeout": number,
+    "message_delay": number,
+    "message_deduplication": bool
+}
 ```
 
 Function:
 
 ```haskell
-if exists queueName
+if exists queue_name
     return 409
-if set deadLetterQueueName and not exists deadLetterQueueName
+if does not parse (body)
     return 400
-if set maxReceives and (maxReceives < 1 or maxReceives > INT32_MAX)
+if set redrive_policy and not exists redrive_policy.dead_letter_queue
     return 400
-if set deadLetterQueue != set maxReceives
+if set redrive_policy.max_receives and (redrive_policy.max_receives < 1 or redrive_policy.max_receives > INT32_MAX)
     return 400
-if retentionSeconds < 1 or retentionSeconds > INT32_MAX
+if retention_timeout < 1 or retention_timeout > INT32_MAX
     return 400
-if visibilityTimeout < 0 or visibilityTimeout > INT32_MAX
+if visibility_timeout < 0 or visibility_timeout > INT32_MAX
     return 400
-if set delaySeconds and (delaySeconds < 0 or delaySeconds > INT32_MAX)
+if set message_delay and (message_delay < 0 or message_delay > INT32_MAX)
     return 400
 createQueue(...)
 return 201
@@ -52,30 +80,55 @@ Responses:
 ### Update properties of a queue
 
 ```http
-POST /queues/<queueName>
-X-MQS-MAX-RECEIVES: <maxReceives, number, optional>
-X-MQS-DEAD-LETTER-QUEUE: <deadLetterQueueName, string, optional>
-X-MQS-RETENTION-SECONDS: <retentionSeconds, number, required>
-X-MQS-VISIBILITY-TIMEOUT-SECONDS: <visibilityTimeoutSeconds, number, required>
-X-MQS-DELAY-SECONDS: <delaySeconds, number, optional>
+POST /queues/<queue_name>
+Content-Type: application/json
+
+{
+    "redrive_policy": {
+        "max_receives": number,
+        "dead_letter_queue": string
+    } | null,
+    "retention_timeout": number,
+    "visibility_timeout": number,
+    "message_delay": number,
+    "message_deduplication": bool
+}
+```
+
+Response:
+
+```http
+Content-Type: application/json
+
+{
+    "name": string,
+    "redrive_policy": {
+        "max_receives": number,
+        "dead_letter_queue": string
+    } | null,
+    "retention_timeout": number,
+    "visibility_timeout": number,
+    "message_delay": number,
+    "message_deduplication": bool
+}
 ```
 
 Function:
 
 ```haskell
-if not exists queueName
+if not exists queue_name
     return 404
-if set deadLetterQueueName and not exists deadLetterQueueName
+if does not parse (body)
     return 400
-if set maxReceives and (maxReceives < 1 or maxReceives > INT32_MAX)
+if set redrive_policy and not exists redrive_policy.dead_letter_queue
     return 400
-if set deadLetterQueue != set maxReceives
+if set redrive_policy.max_receives and (redrive_policy.max_receives < 1 or redrive_policy.max_receives > INT32_MAX)
     return 400
-if retentionSeconds < 1 or retentionSeconds > INT32_MAX
+if retention_timeout < 1 or retention_timeout > INT32_MAX
     return 400
-if visibilityTimeout < 0 or visibilityTimeout > INT32_MAX
+if visibility_timeout < 0 or visibility_timeout > INT32_MAX
     return 400
-if set delaySeconds and (delaySeconds < 0 or delaySeconds > INT32_MAX)
+if set message_delay and (message_delay < 0 or message_delay > INT32_MAX)
     return 400
 updateQueue(...)
 return 200
@@ -94,15 +147,33 @@ Responses:
 ### Delete an existing queue
 
 ```http
-DELETE /queues/<queueName, string>
+DELETE /queues/<queue_name, string>
+```
+
+Response:
+
+```http
+Content-Type: application/json
+
+{
+    "name": string,
+    "redrive_policy": {
+        "max_receives": number,
+        "dead_letter_queue": string
+    } | null,
+    "retention_timeout": number,
+    "visibility_timeout": number,
+    "message_delay": number,
+    "message_deduplication": bool
+}
 ```
 
 Function:
 
 ```haskell
-if not exists queueName
+if not exists queue_name
     return 404
-if any queue has queueName as deadLetterQueue
+if any queue has queue_name as deadLetterQueue
     update queue set deadLetterQueue = None, maxReceives = None
 deleteQueueAndMessages(...)
 return 200
@@ -120,41 +191,7 @@ Responses:
 ### Listing all queues
 
 ```http
-GET /queues
-Range: users=20-40 (optional)
-```
-
-Response:
-
-```http
-Content-Type: application/json; encoding=utf-8
-Accept-Ranges: queues
-Content-Range: queues 0-9/200
-
-{
-    "queues": [
-        {
-            "name": "queueName",
-            "deadLetterQueue": "deadLetterQueueName" or null,
-            "maxReceives": maxReceives or null,
-            "retentionSeconds": retentionSeconds,
-            "visibilityTimeoutSeconds": visibilityTimeoutSeconds,
-            "delaySeconds": delaySeconds or 0
-        }
-    ]
-}
-```
-
-Responses:
-
-- `200 OK` - Valid result with queue data.
-- `416 Request Range Not Satisfyable` - You did not specify a valid range.
-- `500 Internal Server Error` - The server hit an unexpected error condition and can not continue.
-
-### Getting attributes of one queue
-
-```http
-GET /queues/<queueName>
+GET /queues?offset=<offset, number, optional>&limit=<limit, number, optional>
 ```
 
 Response:
@@ -163,12 +200,55 @@ Response:
 Content-Type: application/json
 
 {
-    "name": "queueName",
-    "deadLetterQueue": "deadLetterQueueName" or null,
-    "maxReceives": maxReceives or null,
-    "retentionSeconds": retentionSeconds,
-    "visibilityTimeoutSeconds": visibilityTimeoutSeconds,
-    "delaySeconds": delaySeconds or 0
+    "total": number,
+    "queues": [
+        {
+            "name": string,
+            "redrive_policy": {
+                "max_receives": number,
+                "dead_letter_queue": string
+            } | null,
+            "retention_timeout": number,
+            "visibility_timeout": number,
+            "message_delay": number,
+            "message_deduplication": bool
+        }
+    ]
+}
+```
+
+Responses:
+
+- `200 OK` - Valid result with queue data.
+- `400 Bad Request` - You did not specify numbers for `offset` or `limit`.
+- `500 Internal Server Error` - The server hit an unexpected error condition and can not continue.
+
+### Getting attributes of one queue
+
+```http
+GET /queues/<queue_name>
+```
+
+Response:
+
+```http
+Content-Type: application/json
+
+{
+    "name": string,
+    "redrive_policy": {
+        "max_receives": number,
+        "dead_letter_queue": string
+    } | null,
+    "retention_timeout": number,
+    "visibility_timeout": number,
+    "message_delay": number,
+    "message_deduplication": bool,
+    "status": {
+        "messages": number,
+        "visible_messages": number,
+        "oldest_message_age": number
+    }
 }
 ```
 
@@ -180,26 +260,31 @@ Responses:
 
 ## Operations on messages
 
-For now we only support handling a single message at a time. While batch operations might provide higher throughput, we value simplicity over performance for now. If you need high performance, a managed service like SQS or something more complex and scalable like RabbitMQ might be an alternative for you.
+For now we only support handling a single message at a time.
+While batch operations might provide higher throughput, we value simplicity over performance for now. If you need high performance, a managed service like SQS or something more complex and scalable like RabbitMQ might be an alternative for you.
 
 ### Sending a message to a queue
 
 Note: To avoid loading too large messages into memory, the size of a message is limited to 1 MB.
 If you send more data, it is ignored and cut off after the limit.
+The format of a message is not fixed to json.
+Instead, you can send any content type and content and will receive the same content again when receiving a message.
+So you can without problems send XML, MessagePack or any other (binary) data to a queue and will receive the same data later again.
+If you do not specify a content type, it defaults to `application/octet-stream`.
 
 ```http
-POST /messages/<queueName>
-Content-Type: "application/json; charset=utf-8"
+POST /messages/<queue_name>
+Content-Type: "application/json"
 
 {
-    "message": "data"
+    "any_json_data": "data"
 }
 ```
 
 Function:
 
 ```haskell
-if not exists queueName
+if not exists queue_name
     return 404
 exists = publishMessage(contentType, body.take(1MB))
 if exists
@@ -221,13 +306,13 @@ Responses:
 ### Receiving messages from a queue
 
 ```http
-GET /messages/<queueName>
+GET /messages/<queue_name>
 ```
 
 Function:
 
 ```haskell
-if not exists queueName
+if not exists queue_name
     return 404
 message = fetchMessage(...)
 if messages is some
@@ -240,7 +325,7 @@ catch error
 
 Responses:
 
-- `200 OK` - A message was found and is returned in the response. The header `X-MQS-MESSAGE-ID` contains the id of the message.
+- `200 OK` - A message was found and is returned in the response. The header `X-MQS-MESSAGE-ID` contains the id of the message. `Content-Type` is set to the content type set during message receive.
 - `204 No Content` - No message was found, try again after some time or publishing a message.
 - `404 Not Found` - The specified queue doesn't exist.
 - `500 Internal Server Error` - The server hit an unexpected error condition and can not continue.
@@ -248,15 +333,15 @@ Responses:
 ### Deleting messages from a queue
 
 ```http
-DELETE /messages/<messageId>
+DELETE /messages/<message_id>
 ```
 
 Function:
 
 ```haskell
-if not isUuid(messageId)
+if not isUuid(message_id)
     return 400
-exists = deleteMessage(messageId)
+exists = deleteMessage(message_id)
 if exists
     return 204
 return 404

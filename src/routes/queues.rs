@@ -1,137 +1,222 @@
 use rocket::request::{FromRequest, Outcome};
 use rocket::Request;
-use rocket::http::Status;
+use rocket::http::{RawStr, Status};
+use rocket_contrib::json::{Json, JsonError};
+use diesel::pg::types::date_and_time::PgInterval;
+use diesel::QueryResult;
 
 use crate::connection::DbConn;
 use crate::models::queue::{NewQueue, QueueInput, Queue};
-use crate::routes::{ErrorResponder, StatusResponder};
+use crate::routes::{ErrorResponder, StatusResponder, JsonResponder};
 
-#[derive(Debug)]
-pub struct CreateQueueParams {
-    max_receives: Option<i32>,
-    dead_letter_queue: Option<String>,
+#[derive(Serialize, Deserialize, Debug)]
+struct QueueRedrivePolicy {
+    max_receives: i32,
+    dead_letter_queue: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct QueueConfig {
+    redrive_policy: Option<QueueRedrivePolicy>,
     retention_timeout: i64,
     visibility_timeout: i64,
     message_delay: i64,
-    content_based_deduplication: bool,
+    message_deduplication: bool,
 }
 
-#[derive(Debug)]
-pub enum CreateQueueGuard {
-    Params(CreateQueueParams),
-    Error(&'static str),
+#[derive(Serialize, Debug)]
+pub struct QueueConfigOutput {
+    name: String,
+    redrive_policy: Option<QueueRedrivePolicy>,
+    retention_timeout: i64,
+    visibility_timeout: i64,
+    message_delay: i64,
+    message_deduplication: bool,
 }
 
-fn parse_create_queue_request<'a, 'r>(request: &'a Request<'r>) -> Result<CreateQueueParams, &'static str> {
-    let headers = request.headers();
-    let max_receives = headers.get_one("X-MQS-MAX-RECEIVES")
-        .map_or(Ok(None), |s| match s.parse() {
-            Ok(n) => if n > 0 { Ok(Some(n)) } else { Err("X-MQS-MAX-RECEIVES must not be less than 0") },
-            Err(_) => Err("X-MQS-MAX-RECEIVES must be a valid integer if set"),
-        })?;
-    let dead_letter_queue = headers.get_one("X-MQS-DEAD-LETTER-QUEUE")
-        .map(|s| s.to_string());
-    let retention_timeout = headers.get_one("X-MQS-RETENTION-SECONDS")
-        .map_or(Err("X-MQS-RETENTION-SECONDS is required"), |s| match s.parse() {
-            Ok(n) => if n > 0 { Ok(n) } else { Err("X-MQS-RETENTION-SECONDS must not be less than 0") },
-            Err(_) => Err("X-MQS-RETENTION-SECONDS must be a valid integer"),
-        })?;
-    let visibility_timeout = headers.get_one("X-MQS-VISIBILITY-TIMEOUT-SECONDS")
-        .map_or(Err("X-MQS-VISIBILITY-TIMEOUT-SECONDS is required"), |s| match s.parse() {
-            Ok(n) => if n > 0 { Ok(n) } else { Err("X-MQS-VISIBILITY-TIMEOUT-SECONDS must not be less than 0") },
-            Err(_) => Err("X-MQS-VISIBILITY-TIMEOUT-SECONDS must be a valid integer"),
-        })?;
-    let message_delay = headers.get_one("X-MQS-DELAY-SECONDS")
-        .map_or(Err("X-MQS-DELAY-SECONDS is required"), |s| match s.parse() {
-            Ok(n) => if n >= 0 { Ok(n) } else { Err("X-MQS-DELAY-SECONDS must not be less than 0") },
-            Err(_) => Err("X-MQS-DELAY-SECONDS must be a valid integer"),
-        })?;
-    let content_based_deduplication = headers.get_one("X-MQS-CONTENT-BASED-DEDUPLICATION")
-        .map_or(Err("X-MQS-CONTENT-BASED-DEDUPLICATION is required"), |s| match s {
-            "false" => Ok(false),
-            "true" => Ok(true),
-            _ => Err("X-MQS-CONTENT-BASED-DEDUPLICATION needs to be true or false"),
-        })?;
-
-    if max_receives.is_some() != dead_letter_queue.is_some() {
-        return Err(if max_receives.is_some() {
-            "X-MQS-DEAD-LETTER-QUEUE is required if X-MQS-MAX-RECEIVES is set"
-        } else {
-            "X-MQS-MAX-RECEIVES is required if X-MQS-DEAD-LETTER-QUEUE is set"
-        });
-    }
-
-    Ok(CreateQueueParams {
-        max_receives,
-        dead_letter_queue,
-        retention_timeout,
-        visibility_timeout,
-        message_delay,
-        content_based_deduplication,
-    })
-}
-
-impl <'a, 'r> FromRequest<'a, 'r> for CreateQueueGuard {
-    type Error = ();
-
-    fn from_request(request: &'a Request<'r>) -> Outcome<Self, <Self as FromRequest<'a, 'r>>::Error> {
-        Outcome::Success(match parse_create_queue_request(request) {
-            Err(err) => CreateQueueGuard::Error(err),
-            Ok(res) => CreateQueueGuard::Params(res),
-        })
+impl QueueConfigOutput {
+    fn new(queue: Queue) -> QueueConfigOutput {
+        QueueConfigOutput {
+            name: queue.name,
+            redrive_policy: match (queue.dead_letter_queue, queue.max_receives) {
+                (Some(dead_letter_queue), Some(max_receives)) => Some(QueueRedrivePolicy {
+                    max_receives,
+                    dead_letter_queue,
+                }),
+                _ => None,
+            },
+            retention_timeout: pg_interval_seconds(&queue.retention_timeout),
+            visibility_timeout: pg_interval_seconds(&queue.visibility_timeout),
+            message_delay: pg_interval_seconds(&queue.message_delay),
+            message_deduplication: queue.content_based_deduplication,
+        }
     }
 }
 
-#[put("/queues/<queue_name>")]
-pub fn new_queue(conn: DbConn, queue_name: String, params: CreateQueueGuard) -> Result<StatusResponder, ErrorResponder> {
-    match params {
-        CreateQueueGuard::Error(err) => Err(ErrorResponder::new(err)),
-        CreateQueueGuard::Params(queue_params) => {
-            info!("Creating new queue {}", &queue_name);
-            let created = NewQueue::insert(&conn, &QueueInput {
-                name: &queue_name,
-                max_receives: queue_params.max_receives,
-                dead_letter_queue: &queue_params.dead_letter_queue,
-                retention_timeout: queue_params.retention_timeout,
-                visibility_timeout: queue_params.visibility_timeout,
-                message_delay: queue_params.message_delay,
-                content_based_deduplication: queue_params.content_based_deduplication,
-            });
-
-            Ok(match created {
-                Ok(true) => {
-                    info!("Created new queue {}", &queue_name);
-                    StatusResponder::new(Status::Created)
+impl QueueConfig {
+    fn to_input<'a>(&'a self, queue_name: &'a str) -> QueueInput<'a> {
+        QueueInput {
+                name: queue_name,
+                max_receives: match &self.redrive_policy {
+                    None => None,
+                    Some(p) => Some(p.max_receives),
                 },
-                Ok(false) => {
+                dead_letter_queue: match &self.redrive_policy {
+                    None => None,
+                    Some(p) => Some(&p.dead_letter_queue),
+                },
+                retention_timeout: self.retention_timeout,
+                visibility_timeout: self.visibility_timeout,
+                message_delay: self.message_delay,
+                content_based_deduplication: self.message_deduplication,
+            }
+    }
+}
+
+#[put("/queues/<queue_name>", data = "<params>", format = "application/json")]
+pub fn new_queue(conn: DbConn, queue_name: String, params: Result<Json<QueueConfig>, JsonError>) -> Result<JsonResponder<QueueConfigOutput>, Result<StatusResponder, ErrorResponder>> {
+    match params {
+        Err(err) => {
+            let err_message = format!("{:?}", err);
+            error!("Failed to parse queue params: {}", &err_message);
+            Err(Err(ErrorResponder::new_owned(err_message)))
+        },
+        Ok(Json(config)) => {
+            info!("Creating new queue {}", &queue_name);
+            let created = NewQueue::insert(&conn, &config.to_input(&queue_name));
+
+            match created {
+                Ok(Some(queue)) => {
+                    info!("Created new queue {}", &queue_name);
+                    Ok(JsonResponder::new(Status::Created, QueueConfigOutput::new(queue)))
+                },
+                Ok(None) => {
                     info!("Queue {} did already exist", &queue_name);
-                    StatusResponder::new(Status::Conflict)
+                    Err(Ok(StatusResponder::new(Status::Conflict)))
                 },
                 Err(err) => {
-                    error!("Failed to create new queue {}, {:?}: {}", queue_name, queue_params, err);
-                    StatusResponder::new(Status::InternalServerError)
+                    error!("Failed to create new queue {}, {:?}: {}", queue_name, config, err);
+                    Err(Ok(StatusResponder::new(Status::InternalServerError)))
                 }
-            })
+            }
+        }
+    }
+}
+
+#[post("/queues/<queue_name>", data = "<params>", format = "application/json")]
+pub fn update_queue(conn: DbConn, queue_name: String, params: Result<Json<QueueConfig>, JsonError>) -> Result<JsonResponder<QueueConfigOutput>, Result<StatusResponder, ErrorResponder>> {
+    match params {
+        Err(err) => {
+            let err_message = format!("{:?}", err);
+            error!("Failed to parse queue params: {}", &err_message);
+            Err(Err(ErrorResponder::new_owned(err_message)))
+        },
+        Ok(Json(config)) => {
+            info!("Updating queue {}", &queue_name);
+            let result = Queue::update(&conn, &config.to_input(&queue_name));
+
+            match result {
+                Ok(Some(queue)) => {
+                    info!("Updated queue {}", &queue_name);
+                    Ok(JsonResponder::new(Status::Ok, QueueConfigOutput::new(queue)))
+                },
+                Ok(None) => {
+                    info!("Queue {} did not exist", &queue_name);
+                    Err(Ok(StatusResponder::new(Status::NotFound)))
+                },
+                Err(err) => {
+                    error!("Failed to update queue {}, {:?}: {}", queue_name, config, err);
+                    Err(Ok(StatusResponder::new(Status::InternalServerError)))
+                }
+            }
         }
     }
 }
 
 #[delete("/queues/<queue_name>")]
-pub fn delete_queue(conn: DbConn, queue_name: String) -> StatusResponder {
+pub fn delete_queue(conn: DbConn, queue_name: String) -> Result<JsonResponder<QueueConfigOutput>, StatusResponder> {
     info!("Deleting queue {}", &queue_name);
     let deleted = Queue::delete_by_name(&conn, &queue_name);
     match deleted {
-        Ok(true) => {
+        Ok(Some(queue)) => {
             info!("Deleted queue {}", &queue_name);
-            StatusResponder::new(Status::Ok)
+            Ok(JsonResponder::new(Status::Ok, QueueConfigOutput::new(queue)))
         },
-        Ok(false) => {
+        Ok(None) => {
             info!("Message {} was not found", &queue_name);
-            StatusResponder::new(Status::NotFound)
+            Err(StatusResponder::new(Status::NotFound))
         },
         Err(err) => {
             error!("Failed to delete queue {}: {}", &queue_name, err);
-            StatusResponder::new(Status::InternalServerError)
+            Err(StatusResponder::new(Status::InternalServerError))
+        },
+    }
+}
+
+#[derive(Debug)]
+pub struct QueuesRange {
+    offset: Option<i64>,
+    limit: Option<i64>,
+}
+
+fn check_option<T, E>(value: Option<Result<T, E>>) -> Result<Option<T>, E> {
+    match value {
+        None => Ok(None),
+        Some(Ok(val)) => Ok(Some(val)),
+        Some(Err(err)) => Err(err),
+    }
+}
+
+impl <'a, 'r> FromRequest<'a, 'r> for QueuesRange {
+    type Error = String;
+
+    fn from_request(request: &'a Request<'r>) -> Outcome<Self, <Self as FromRequest<'a, 'r>>::Error> {
+        let offset = check_option::<i64, &RawStr>(request.get_query_value("offset"));
+        let limit = check_option::<i64, &RawStr>(request.get_query_value("limit"));
+
+        match (offset, limit) {
+            (Err(err), _) => Outcome::Failure((Status::BadRequest, format!("invalid value for number field offset: {}", err))),
+            (_, Err(err)) => Outcome::Failure((Status::BadRequest, format!("invalid value for number field limit: {}", err))),
+            (Ok(offset), Ok(limit)) => Outcome::Success(QueuesRange {
+                offset,
+                limit,
+            })
+        }
+    }
+}
+
+fn pg_interval_seconds(interval: &PgInterval) -> i64 {
+    interval.microseconds / 1000000
+        + interval.days as i64 * (24 * 3600)
+        + interval.months as i64 * (30 * 24 * 3600)
+}
+
+#[derive(Serialize, Debug)]
+pub struct QueuesResponse {
+    queues: Vec<QueueConfigOutput>,
+    total: i64,
+}
+
+fn list_queues_and_count(conn: DbConn, range: &QueuesRange) -> QueryResult<QueuesResponse> {
+    let queues = Queue::list(&conn, range.offset, range.limit)?;
+    let total = Queue::count(&conn)?;
+    Ok(QueuesResponse {
+        queues: queues.into_iter().map(|queue| QueueConfigOutput::new(queue)).collect(),
+        total,
+    })
+}
+
+#[get("/queues")]
+pub fn list_queues(conn: DbConn, range: Result<QueuesRange, String>) -> Result<Result<JsonResponder<QueuesResponse>, ErrorResponder>, StatusResponder> {
+    match range {
+        Err(err) => Ok(Err(ErrorResponder::new_owned(err))),
+        Ok(range) => match list_queues_and_count(conn, &range) {
+            Ok(response) => Ok(Ok(JsonResponder::new(Status::Ok, response))),
+            Err(err) => {
+                error!("Failed to read range of queues {:?}-{:?}: {}", range.offset, range.limit, err);
+
+                Err(StatusResponder::new(Status::InternalServerError))
+            },
         },
     }
 }
