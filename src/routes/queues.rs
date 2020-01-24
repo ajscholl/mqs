@@ -220,3 +220,53 @@ pub fn list_queues(conn: DbConn, range: Result<QueuesRange, String>) -> Result<R
         },
     }
 }
+
+#[derive(Serialize, Debug)]
+pub struct QueueStatus {
+    messages: i64,
+    visible_messages: i64,
+    oldest_message_age: i64,
+}
+
+#[derive(Serialize, Debug)]
+pub struct QueueDescription {
+    name: String,
+    redrive_policy: Option<QueueRedrivePolicy>,
+    retention_timeout: i64,
+    visibility_timeout: i64,
+    message_delay: i64,
+    message_deduplication: bool,
+    status: QueueStatus,
+}
+
+impl QueueDescription {
+    fn new(queue: Queue, messages: i64, visible_messages: i64, oldest_message_age: i64) -> QueueDescription {
+        let queue_description = QueueConfigOutput::new(queue);
+
+        QueueDescription {
+            name: queue_description.name,
+            redrive_policy: queue_description.redrive_policy,
+            retention_timeout: queue_description.retention_timeout,
+            visibility_timeout: queue_description.visibility_timeout,
+            message_delay: queue_description.message_delay,
+            message_deduplication: queue_description.message_deduplication,
+            status: QueueStatus {
+                messages,
+                visible_messages,
+                oldest_message_age,
+            },
+        }
+    }
+}
+
+#[get("/queues/<queue_name>")]
+pub fn describe_queue(conn: DbConn, queue_name: String) -> Result<JsonResponder<QueueDescription>, StatusResponder> {
+    match Queue::describe(&conn, &queue_name) {
+        Err(err) => {
+            error!("Failed to describe queue {}: {}", &queue_name, err);
+            Err(StatusResponder::new(Status::InternalServerError))
+        },
+        Ok(None) => Err(StatusResponder::new(Status::NotFound)),
+        Ok(Some(description)) => Ok(JsonResponder::new(Status::Ok, QueueDescription::new(description.queue, description.messages, description.visible_messages, description.oldest_message_age))),
+    }
+}

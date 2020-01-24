@@ -3,6 +3,7 @@ use diesel::prelude::*;
 use diesel::pg::PgConnection;
 use diesel::pg::data_types::PgInterval;
 
+use crate::schema::messages;
 use crate::schema::queues;
 use diesel::result::{Error, DatabaseErrorKind};
 
@@ -96,6 +97,13 @@ impl <'a> NewQueue<'a> {
     }
 }
 
+pub struct QueueDescription {
+    pub queue: Queue,
+    pub messages: i64,
+    pub visible_messages: i64,
+    pub oldest_message_age: i64,
+}
+
 impl Queue {
     pub fn find_by_name(conn: &PgConnection, name: &str) -> QueryResult<Option<Queue>> {
         queues::table
@@ -108,6 +116,42 @@ impl Queue {
         queues::table
             .count()
             .get_result(conn)
+    }
+
+    pub fn describe(conn: &PgConnection, name: &str) -> QueryResult<Option<QueueDescription>> {
+        match Queue::find_by_name(conn, name)? {
+            None => Ok(None),
+            Some(queue) => {
+                let messages = messages::table
+                    .filter(messages::queue.eq(&queue.name))
+                    .count()
+                    .get_result(conn)?;
+                let now = Utc::now();
+                let visible_messages = messages::table
+                    .filter(messages::queue.eq(&queue.name).and(messages::visible_since.le(now.naive_utc())))
+                    .count()
+                    .get_result(conn)?;
+                let oldest_message: Option<NaiveDateTime> = messages::table
+                    .select(messages::created_at)
+                    .filter(messages::queue.eq(&queue.name))
+                    .limit(1)
+                    .order(messages::created_at.asc())
+                    .for_key_share()
+                    .skip_locked()
+                    .get_result(conn)
+                    .optional()?;
+
+                Ok(Some(QueueDescription {
+                    queue,
+                    messages,
+                    visible_messages,
+                    oldest_message_age: match oldest_message {
+                        None => 0,
+                        Some(created_at) => now.naive_utc().timestamp() - created_at.timestamp(),
+                    },
+                }))
+            }
+        }
     }
 
     pub fn list(conn: &PgConnection, offset: Option<i64>, limit: Option<i64>) -> QueryResult<Vec<Queue>> {
