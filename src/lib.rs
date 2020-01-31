@@ -2,6 +2,7 @@
 
 extern crate base64;
 extern crate chrono;
+extern crate hyper;
 extern crate regex;
 extern crate time;
 extern crate uuid;
@@ -11,6 +12,7 @@ extern crate uuid;
 #[macro_use] extern crate rocket;
 #[macro_use] extern crate serde_derive;
 
+pub mod client;
 pub mod models;
 pub mod schema;
 pub mod connection;

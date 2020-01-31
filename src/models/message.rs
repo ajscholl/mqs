@@ -175,10 +175,9 @@ impl Message {
         let messages: Vec<Message> = update_query.get_results(conn)?;
 
         // filter result, move messages to dead letter queues
-        let mut result = Vec::new();
+        let mut result = Vec::with_capacity(messages.len());
         let mut move_to_dead_letter_queue = Vec::new();
         let mut to_delete = Vec::new();
-        result.reserve_exact(messages.len());
         for message in messages {
             let created_at = DateTime::from_utc(message.created_at, Utc);
             if add_pg_interval(&created_at, &queue.retention_timeout) < now {

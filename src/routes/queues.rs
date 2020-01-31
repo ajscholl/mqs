@@ -10,28 +10,28 @@ use crate::models::queue::{NewQueue, QueueInput, Queue};
 use crate::routes::{ErrorResponder, StatusResponder, JsonResponder};
 
 #[derive(Serialize, Deserialize, Debug)]
-struct QueueRedrivePolicy {
-    max_receives: i32,
-    dead_letter_queue: String,
+pub struct QueueRedrivePolicy {
+    pub max_receives: i32,
+    pub dead_letter_queue: String,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct QueueConfig {
-    redrive_policy: Option<QueueRedrivePolicy>,
-    retention_timeout: i64,
-    visibility_timeout: i64,
-    message_delay: i64,
-    message_deduplication: bool,
+    pub redrive_policy: Option<QueueRedrivePolicy>,
+    pub retention_timeout: i64,
+    pub visibility_timeout: i64,
+    pub message_delay: i64,
+    pub message_deduplication: bool,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct QueueConfigOutput {
-    name: String,
-    redrive_policy: Option<QueueRedrivePolicy>,
-    retention_timeout: i64,
-    visibility_timeout: i64,
-    message_delay: i64,
-    message_deduplication: bool,
+    pub name: String,
+    pub redrive_policy: Option<QueueRedrivePolicy>,
+    pub retention_timeout: i64,
+    pub visibility_timeout: i64,
+    pub message_delay: i64,
+    pub message_deduplication: bool,
 }
 
 impl QueueConfigOutput {
@@ -56,20 +56,20 @@ impl QueueConfigOutput {
 impl QueueConfig {
     fn to_input<'a>(&'a self, queue_name: &'a str) -> QueueInput<'a> {
         QueueInput {
-                name: queue_name,
-                max_receives: match &self.redrive_policy {
-                    None => None,
-                    Some(p) => Some(p.max_receives),
-                },
-                dead_letter_queue: match &self.redrive_policy {
-                    None => None,
-                    Some(p) => Some(&p.dead_letter_queue),
-                },
-                retention_timeout: self.retention_timeout,
-                visibility_timeout: self.visibility_timeout,
-                message_delay: self.message_delay,
-                content_based_deduplication: self.message_deduplication,
-            }
+            name: queue_name,
+            max_receives: match &self.redrive_policy {
+                None => None,
+                Some(p) => Some(p.max_receives),
+            },
+            dead_letter_queue: match &self.redrive_policy {
+                None => None,
+                Some(p) => Some(&p.dead_letter_queue),
+            },
+            retention_timeout: self.retention_timeout,
+            visibility_timeout: self.visibility_timeout,
+            message_delay: self.message_delay,
+            content_based_deduplication: self.message_deduplication,
+        }
     }
 }
 
@@ -191,10 +191,10 @@ fn pg_interval_seconds(interval: &PgInterval) -> i64 {
         + interval.months as i64 * (30 * 24 * 3600)
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct QueuesResponse {
-    queues: Vec<QueueConfigOutput>,
-    total: i64,
+    pub queues: Vec<QueueConfigOutput>,
+    pub total: i64,
 }
 
 fn list_queues_and_count(conn: DbConn, range: &QueuesRange) -> QueryResult<QueuesResponse> {
@@ -221,22 +221,22 @@ pub fn list_queues(conn: DbConn, range: Result<QueuesRange, String>) -> Result<R
     }
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct QueueStatus {
-    messages: i64,
-    visible_messages: i64,
-    oldest_message_age: i64,
+    pub messages: i64,
+    pub visible_messages: i64,
+    pub oldest_message_age: i64,
 }
 
-#[derive(Serialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct QueueDescription {
-    name: String,
-    redrive_policy: Option<QueueRedrivePolicy>,
-    retention_timeout: i64,
-    visibility_timeout: i64,
-    message_delay: i64,
-    message_deduplication: bool,
-    status: QueueStatus,
+    pub name: String,
+    pub redrive_policy: Option<QueueRedrivePolicy>,
+    pub retention_timeout: i64,
+    pub visibility_timeout: i64,
+    pub message_delay: i64,
+    pub message_deduplication: bool,
+    pub status: QueueStatus,
 }
 
 impl QueueDescription {

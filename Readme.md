@@ -139,7 +139,7 @@ catch error
 
 Responses:
 
-- `200 Created` - The queue was successfully updated and can now be used. Messages will not become visible if you reduce the visibility timeout and a message is already hidden, will not be moved to dead letter queues or deleted until you receive the message again.
+- `200 Ok` - The queue was successfully updated and can now be used. Messages will not become visible if you reduce the visibility timeout and a message is already hidden, will not be moved to dead letter queues or deleted until you receive the message again.
 - `400 Bad Request` - One or multiple parameters did not validate. Body contains an error response.
 - `404 Not Found` - A queue with the same name does not exists.
 - `500 Internal Server Error` - The server hit an unexpected error condition and can not continue.

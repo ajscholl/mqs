@@ -18,6 +18,13 @@ features = ["postgres", "chrono", "uuid"]
 [dependencies.dotenv]
 version = "0.15.0"
 
+[dependencies.hyper]
+version = "0.13"
+
+[dependencies.tokio]
+version = "0.2.10"
+features = ["full"]
+
 [dependencies.log]
 version = "0.4.8"
 

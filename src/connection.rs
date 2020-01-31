@@ -11,21 +11,24 @@ pub type Pool = r2d2::Pool<ConnectionManager<PgConnection>>;
 
 pub struct DbConn(pub r2d2::PooledConnection<ConnectionManager<PgConnection>>);
 
-pub fn init_pool() -> Pool {
+pub fn init_pool() -> (Pool, u16) {
     let manager = ConnectionManager::<PgConnection>::new(database_url());
-    Pool::builder()
-         .max_size(pool_size())
+    let size = pool_size();
+    let pool = Pool::builder()
+         .max_size(size as u32)
          .build(manager)
-         .expect("Failed to initialize database pool")
+         .expect("Failed to initialize database pool");
+
+    (pool, size)
 }
 
 fn database_url() -> String {
     env::var("DATABASE_URL").expect("DATABASE_URL must be set")
 }
 
-fn pool_size() -> u32 {
+fn pool_size() -> u16 {
     let size = env::var("POOL_SIZE").expect("POOL_SIZE must be set");
-    size.parse::<u32>().expect("POOL_SIZE must be an integer")
+    size.parse::<u16>().expect("POOL_SIZE must be an integer")
 }
 
 impl <'a, 'r> FromRequest<'a, 'r> for DbConn {

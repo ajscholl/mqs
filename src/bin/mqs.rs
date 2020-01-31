@@ -7,13 +7,13 @@ extern crate dotenv;
 
 use dotenv::dotenv;
 use std::env;
+use std::env::VarError;
 use rocket::Config;
 use rocket::config::{Environment, Limits};
+use rocket::logger::LoggingLevel;
 
 use mqs::connection::init_pool;
 use mqs::routes::*;
-use std::env::VarError;
-use rocket::logger::LoggingLevel;
 
 fn main() {
     dotenv().ok();
@@ -41,17 +41,20 @@ fn main() {
         },
     };
 
+    let (pool, pool_size) = init_pool();
+
     let config = Config::build(run_env)
         .address("0.0.0.0")
         .port(7843)
-        .keep_alive(60)
+        .keep_alive(0)
+        .workers(pool_size)
         .log_level(LoggingLevel::Normal)
         .limits(Limits::new().limit("forms", 1024 * 1024).limit("json", 1024 * 1024))
         .finalize()
         .expect("Unwrapping server config");
 
     rocket::custom(config)
-        .manage(init_pool())
+        .manage(pool)
         .mount("/", routes![health::health])
         .mount("/", routes![queues::new_queue])
         .mount("/", routes![queues::update_queue])
