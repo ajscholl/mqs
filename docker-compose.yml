@@ -1,0 +1,46 @@
+version: '2.4'
+
+services:
+  postgres:
+    image: postgres:11.2
+    mem_limit: 512m
+    mem_reservation: 512m
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: 6f55ceed83f286e23fbd1ae3323ab5704867a716e0bb6cb0c7d8e026805729b9
+      POSTGRES_DB: test
+    expose:
+    - 5432
+    networks:
+      test: {}
+
+  mqs:
+    image: ${CI_REGISTRY_IMAGE}/mqs:${CI_COMMIT_REF_NAME}
+    mem_limit: 256m
+    mem_reservation: 256m
+    environment:
+      ENV: dev
+      DATABASE_URL: postgres://root:6f55ceed83f286e23fbd1ae3323ab5704867a716e0bb6cb0c7d8e026805729b9@postgres/test
+      POOL_SIZE: 25
+    expose:
+    - 7843
+    networks:
+      test: {}
+    depends_on:
+    - postgres
+
+  bench:
+    image: ${CI_REGISTRY_IMAGE}/bench:${CI_COMMIT_REF_NAME}
+    mem_limit: 256m
+    mem_reservation: 256m
+    environment:
+      DATABASE_URL: postgres://root:6f55ceed83f286e23fbd1ae3323ab5704867a716e0bb6cb0c7d8e026805729b9@postgres/test
+      MQS_SERVER: mqs
+    networks:
+      test: {}
+    depends_on:
+    - mqs
+
+networks:
+  test:
+    driver: bridge

@@ -5,6 +5,7 @@ services:
 stages:
 - compile
 - image
+- benchmark
 
 before_script:
   - env
@@ -39,11 +40,16 @@ compile:
      - which cargo
      - cargo build --locked --release
      - mkdir -p bin
-     - mv target/release/mqs bin
+     - cp target/release/mqs bin
+     - cp target/release/bench bin
+     - cargo install diesel_cli
+     - cp "$CARGO_HOME/bin/diesel" bin
      - ls -lah bin
   artifacts:
     paths:
     - bin/mqs
+    - bin/bench
+    - bin/diesel
     expire_in: 1 week
   cache:
     paths:
@@ -64,3 +70,22 @@ mqs:image:
   variables:
     IMAGE_NAME: $CI_REGISTRY_IMAGE/mqs:$CI_COMMIT_REF_NAME
     DOCKERFILE: Dockerfile.mqs
+
+bench:image:
+  extends: .template:image
+  variables:
+    IMAGE_NAME: $CI_REGISTRY_IMAGE/bench:$CI_COMMIT_REF_NAME
+    DOCKERFILE: Dockerfile.bench
+
+benchmark:
+  stage: benchmark
+  before_script:
+    - apk update
+    - apk add docker-compose
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - docker-compose --project-name "mqs-benchmark-$CI_JOB_ID" up --detach postgres mqs
+  after_script:
+    - docker-compose --project-name "mqs-benchmark-$CI_JOB_ID" down
+  script:
+    - sleep 10
+    - docker-compose --project-name "mqs-benchmark-$CI_JOB_ID" up --exit-code-from bench bench

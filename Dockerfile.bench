@@ -1,0 +1,15 @@
+FROM debian:stretch
+
+RUN apt-get update && \
+    apt-get upgrade -yy && \
+    apt-get install -yy libpq5 libsqlite3-0 libmariadbclient18 && \
+    apt-get autoremove && \
+    rm -rf /var/lib/apt/lists/* && \
+    mkdir -p /bench
+
+WORKDIR /bench
+CMD /usr/local/bin/diesel migration run && exec /usr/local/bin/bench
+
+COPY ./bin/diesel /usr/local/bin/diesel
+COPY ./migrations ./migrations
+COPY ./bin/bench /usr/local/bin/bench

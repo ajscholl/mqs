@@ -6,6 +6,7 @@ use mqs::routes::queues::QueueConfig;
 
 use std::error::Error;
 use std::fmt::{Display, Formatter};
+use std::env;
 use chrono::Utc;
 use std::ops::Sub;
 use hyper::HeaderMap;
@@ -34,9 +35,14 @@ unsafe impl Send for StringError {}
 unsafe impl Sync for StringError {}
 impl Error for StringError {}
 
+fn get_service() -> Service {
+    let host = env::var("MQS_SERVER").unwrap_or("localhost".to_string());
+    Service::new(&format!("http://{}:7843", &host))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), AnyError> {
-    let s = Service::new("http://localhost:7843");
+    let s = get_service();
     let queue_count: usize = 10;
     let queues = s.get_queues(None, None).await?;
     // clear data
@@ -136,7 +142,7 @@ async fn main() -> Result<(), AnyError> {
 }
 
 async fn publish_messages(queue: String) -> Result<(), AnyError> {
-    let s = Service::new("http://localhost:7843");
+    let s = get_service();
     let mut headers = HeaderMap::new();
     headers.insert(HeaderName::from_static("content-type"), HeaderValue::from_static("application/json"));
     let message = "{\"data\":\"a test\"}".as_bytes().to_owned();
@@ -167,7 +173,7 @@ async fn consume_messages(queue: String) -> Result<(), AnyError> {
     for _ in 0..handles.capacity() {
         let queue_name = queue.clone();
         let handle = tokio::spawn(async {
-            let s = Service::new("http://localhost:7843");
+            let s = get_service();
             let queue2 = queue_name;
             loop {
                 let messages = s.get_messages(&queue2, 10).await?;
