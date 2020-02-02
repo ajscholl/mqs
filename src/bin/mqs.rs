@@ -61,8 +61,8 @@ fn main() {
         .mount("/", routes![queues::delete_queue])
         .mount("/", routes![queues::list_queues])
         .mount("/", routes![queues::describe_queue])
-        .mount("/", routes![messages::publish_message])
-        .mount("/", routes![messages::receive_message])
+        .mount("/", routes![messages::publish_messages])
+        .mount("/", routes![messages::receive_messages])
         .mount("/", routes![messages::delete_message])
         .launch();
 }

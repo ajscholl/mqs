@@ -33,7 +33,7 @@ pub struct NewMessage<'a> {
     pub created_at: NaiveDateTime,
 }
 
-#[derive(Queryable, Associations, Identifiable, Serialize)]
+#[derive(Queryable, Associations, Identifiable, Serialize, Debug)]
 pub struct Message {
     pub id: Uuid,
     pub payload: String,

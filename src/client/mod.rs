@@ -1,12 +1,14 @@
-use hyper::{Client, Body, Request, Method, Response};
+use hyper::{Client, Body, Request, Method, Response, HeaderMap};
 use hyper::client::HttpConnector;
 use hyper::body::{HttpBody, Buf};
-use hyper::header::HeaderValue;
+use hyper::header::{HeaderValue, HeaderName};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use serde::Deserialize;
 
+use crate::multipart;
 use crate::routes::queues::{QueuesResponse, QueueDescription, QueueConfig};
+use crate::routes::messages::DEFAULT_CONTENT_TYPE;
 
 #[derive(Debug)]
 pub enum ClientError {
@@ -14,6 +16,8 @@ pub enum ClientError {
     InvalidUri(hyper::http::uri::InvalidUri),
     IoError(std::io::Error),
     ParseError(serde_json::error::Error),
+    InvalidHeaderValue(hyper::header::InvalidHeaderValue),
+    MultipartParseError(multipart::ParseError),
     ServiceError(u16),
 }
 
@@ -46,6 +50,18 @@ impl From<std::io::Error> for ClientError {
 impl From<serde_json::error::Error> for ClientError {
     fn from(error: serde_json::error::Error) -> Self {
         ClientError::ParseError(error)
+    }
+}
+
+impl From<hyper::header::InvalidHeaderValue> for ClientError {
+    fn from(error: hyper::header::InvalidHeaderValue) -> Self {
+        ClientError::InvalidHeaderValue(error)
+    }
+}
+
+impl From<multipart::ParseError> for ClientError {
+    fn from(error: multipart::ParseError) -> Self {
+        ClientError::MultipartParseError(error)
     }
 }
 
@@ -164,25 +180,55 @@ impl Service {
     }
 
     pub async fn get_message(&self, queue_name: &str) -> Result<Option<MessageResponse>, ClientError> {
+        let mut messages = self.get_messages(queue_name, 1).await?;
+        Ok(messages.pop())
+    }
+
+    fn parse_message<F: FnOnce() -> Result<Vec<u8>, ClientError>>(headers: &HeaderMap, get_body: F) -> Result<MessageResponse, ClientError> {
+        let message_id = headers.get("X-MQS-MESSAGE-ID").map_or_else(|| "", |h| {
+            h.to_str().unwrap_or("")
+        }).to_string();
+        let content_type = headers.get("Content-Type").map_or_else(|| DEFAULT_CONTENT_TYPE, |h| {
+            h.to_str().unwrap_or(DEFAULT_CONTENT_TYPE)
+        }).to_string();
+        let content = get_body()?;
+        Ok(MessageResponse {
+            message_id,
+            content_type,
+            content,
+        })
+    }
+
+    pub async fn get_messages(&self, queue_name: &str, limit: u16) -> Result<Vec<MessageResponse>, ClientError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+
         let uri = format!("{}/messages/{}", &self.host, queue_name);
-       let req = Self::new_request(Method::GET, &uri, Body::default())?;
+        let mut req = Self::new_request(Method::GET, &uri, Body::default())?;
+        if let Ok(value) = HeaderValue::from_str(&format!("{}", limit)) {
+            req.headers_mut().insert(HeaderName::from_static("x-mqs-max-messages"), value);
+        }
         let mut response = self.client.request(req).await?;
         match response.status().as_u16() {
             200 => {
-                let message_id = response.headers().get("X-MQS-MESSAGE-ID").map_or_else(|| "".to_string(), |h| {
-                    h.to_str().unwrap_or("").to_string()
-                });
-                let content_type = response.headers().get("Content-Type").map_or_else(|| "application/octet-stream".to_string(), |h| {
-                    h.to_str().unwrap_or("application/octet-stream").to_string()
-                });
-                let content = Self::read_body(response.body_mut()).await?;
-                Ok(Some(MessageResponse {
-                    message_id,
-                    content_type,
-                    content,
-                }))
+                let content_type = response.headers().get("Content-Type").map_or_else(|| DEFAULT_CONTENT_TYPE, |h| {
+                    h.to_str().unwrap_or(DEFAULT_CONTENT_TYPE)
+                }).to_string();
+                let body = Self::read_body(response.body_mut()).await?;
+                if let Some(boundary) = multipart::is_multipart(&content_type) {
+                    let chunks = multipart::parse(&boundary, std::str::from_utf8(body.as_slice()).unwrap_or(""))?;
+                    let mut messages = Vec::with_capacity(chunks.len());
+                    for (headers, message) in chunks {
+                        messages.push(Self::parse_message(&headers, || Ok(message.as_bytes().to_vec()))?);
+                    }
+                    Ok(messages)
+                } else {
+                    let message = Self::parse_message(response.headers(), || Ok(body))?;
+                    Ok(vec![message])
+                }
             },
-            204 => Ok(None),
+            204 => Ok(Vec::new()),
             status => Err(ClientError::ServiceError(status)),
         }
     }
@@ -199,7 +245,19 @@ impl Service {
             201 => Ok(true),
             status => Err(ClientError::ServiceError(status)),
         }
+    }
 
+    pub async fn publish_messages(&self, queue_name: &str, messages: &Vec<(HeaderMap, Vec<u8>)>) -> Result<bool, ClientError> {
+        let uri = format!("{}/messages/{}", &self.host, queue_name);
+        let (boundary, body) = multipart::encode(messages);
+        let mut req = Self::new_request(Method::POST, &uri, Body::from(body))?;
+        req.headers_mut().insert("Content-Type", HeaderValue::from_str(&format!("multipart/mixed; boundary={}", boundary))?);
+        let response = self.client.request(req).await?;
+        match response.status().as_u16() {
+            200 => Ok(false),
+            201 => Ok(true),
+            status => Err(ClientError::ServiceError(status)),
+        }
     }
 
     pub async fn delete_message(&self, message_id: &str) -> Result<bool, ClientError> {

@@ -8,6 +8,8 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 use chrono::Utc;
 use std::ops::Sub;
+use hyper::HeaderMap;
+use hyper::header::{HeaderName, HeaderValue};
 
 type AnyError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -135,9 +137,23 @@ async fn main() -> Result<(), AnyError> {
 
 async fn publish_messages(queue: String) -> Result<(), AnyError> {
     let s = Service::new("http://localhost:7843");
+    let mut headers = HeaderMap::new();
+    headers.insert(HeaderName::from_static("content-type"), HeaderValue::from_static("application/json"));
     let message = "{\"data\":\"a test\"}".as_bytes().to_owned();
-    for _ in 0..10000 {
-        let result = s.publish_message(&queue, "application/json", message.clone()).await?;
+    let message_bundle = vec![
+        (headers.clone(), message.clone()),
+        (headers.clone(), message.clone()),
+        (headers.clone(), message.clone()),
+        (headers.clone(), message.clone()),
+        (headers.clone(), message.clone()),
+        (headers.clone(), message.clone()),
+        (headers.clone(), message.clone()),
+        (headers.clone(), message.clone()),
+        (headers.clone(), message.clone()),
+        (headers.clone(), message.clone()),
+    ];
+    for _ in 0..1000 {
+        let result = s.publish_messages(&queue, &message_bundle).await?;
         if !result {
             Err(StringError::new("Expected successful publish"))?;
         }
@@ -153,11 +169,17 @@ async fn consume_messages(queue: String) -> Result<(), AnyError> {
         let handle = tokio::spawn(async {
             let s = Service::new("http://localhost:7843");
             let queue2 = queue_name;
-            while let Some(message) = s.get_message(&queue2).await? {
-                let deleted = s.delete_message(&message.message_id).await?;
+            loop {
+                let messages = s.get_messages(&queue2, 10).await?;
+                if messages.is_empty() {
+                    break;
+                }
+                for message in messages {
+                    let deleted = s.delete_message(&message.message_id).await?;
 
-                if !deleted {
-                    Err(StringError::new("Failed to delete message"))?;
+                    if !deleted {
+                        Err(StringError::new("Failed to delete message"))?;
+                    }
                 }
             }
 

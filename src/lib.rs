@@ -13,7 +13,8 @@ extern crate uuid;
 #[macro_use] extern crate serde_derive;
 
 pub mod client;
-pub mod models;
-pub mod schema;
 pub mod connection;
+pub mod models;
+pub mod multipart;
 pub mod routes;
+pub mod schema;
