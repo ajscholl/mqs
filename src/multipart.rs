@@ -1,5 +1,4 @@
 use uuid::Uuid;
-use rocket::http::ContentType;
 use hyper::HeaderMap;
 use hyper::header::{HeaderName, HeaderValue, InvalidHeaderName, InvalidHeaderValue};
 use std::fmt::{Display, Formatter};
@@ -32,16 +31,41 @@ pub fn encode(messages: &Vec<(HeaderMap, Vec<u8>)>) -> (String, Vec<u8>) {
 
 /// Return the boundary from "multipart/mixed; boundary=..."
 pub fn is_multipart(content_type: &str) -> Option<String> {
-    if let Ok(ct) = content_type.parse() {
-        let ct: ContentType = ct;
-        if !ct.top().eq("multipart") || !ct.sub().eq("mixed") {
-            return None;
+    // TODO: a real parser would be nice...
+    let (top, rest) = {
+        let mut i = content_type.splitn(2, "/").into_iter();
+        let top = i.next();
+        let rest = i.next();
+        debug_assert!(i.next().is_none());
+        match (top, rest) {
+            (Some(top), Some(rest)) => (top, rest),
+            _ => return None,
         }
+    };
+    if top != "multipart" || !rest.starts_with("mixed;") {
+        return None;
+    }
 
-        for (key, value) in ct.params() {
-            if key == "boundary" {
-                return Some(format!("--{}", value));
+    for param in rest.split(";").into_iter() {
+        let (key, value) = {
+            let mut i = param.splitn(2, "=").into_iter();
+            let key = i.next();
+            let value = i.next();
+            debug_assert!(i.next().is_none());
+            match (key, value) {
+                (Some(key), Some(value)) => (key.trim(), {
+                    let trimmed = value.trim();
+                    if trimmed.starts_with("\"") && trimmed.ends_with("\"") {
+                        &trimmed[1..trimmed.len() - 1]
+                    } else {
+                        trimmed
+                    }
+                }),
+                _ => continue,
             }
+        };
+        if key == "boundary" {
+            return Some(format!("--{}", value));
         }
     }
 

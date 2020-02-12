@@ -2,6 +2,8 @@ use chrono::{NaiveDateTime, Utc};
 use diesel::prelude::*;
 use diesel::pg::PgConnection;
 use diesel::pg::data_types::PgInterval;
+use cached::stores::TimedCache;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::schema::messages;
 use crate::schema::queues;
@@ -32,7 +34,7 @@ pub struct NewQueue<'a> {
     pub updated_at: NaiveDateTime,
 }
 
-#[derive(Queryable, Associations, Identifiable)]
+#[derive(Queryable, Associations, Identifiable, Clone, Debug, PartialEq)]
 pub struct Queue {
     pub id: i32,
     pub name: String,
@@ -110,6 +112,10 @@ impl Queue {
             .filter(queues::name.eq(name))
             .first::<Queue>(conn)
             .optional()
+    }
+
+    pub fn find_by_name_cached(conn: &PgConnection, name: &str) -> QueryResult<Option<Queue>> {
+        find_queue_by_name_cached(conn, name)
     }
 
     pub fn count(conn: &PgConnection) -> QueryResult<i64> {
@@ -194,5 +200,100 @@ impl Queue {
             .returning(queues::all_columns)
             .get_result(conn)
             .optional()
+    }
+}
+
+static CACHE_HITS: AtomicUsize = AtomicUsize::new(0);
+static CACHE_MISSES: AtomicUsize = AtomicUsize::new(0);
+
+cached_control!{
+    QUEUE_CACHE: TimedCache<String, Queue> = TimedCache::with_lifespan(10);
+
+    Key = { queue_name.to_string() };
+
+    PostGet(cached_val) = {
+        let cache_hits = CACHE_HITS.fetch_add(1, Ordering::Relaxed) + 1;
+        info!("Found queue of name {}, total {} cache hits", &cached_val.name, cache_hits);
+        return Ok(Some(cached_val.clone()))
+    };
+
+    PostExec(body_result) = {
+        match body_result {
+            Ok(Some(v)) => v,
+            Ok(None) => return Ok(None),
+            Err(e) => return Err(e),
+        }
+    };
+
+    Set(set_value) = { set_value.clone() };
+
+    Return(return_value) = {
+        Ok(Some(return_value))
+    };
+
+    fn find_queue_by_name_cached(conn: &PgConnection, queue_name: &str) -> QueryResult<Option<Queue>> = {
+        let cache_misses = CACHE_MISSES.fetch_add(1, Ordering::Relaxed) + 1;
+        info!("Getting queue of name {}, total {} cache misses", queue_name, cache_misses);
+        Queue::find_by_name(conn, queue_name)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    static TEST_CACHE_HITS: AtomicUsize = AtomicUsize::new(0);
+    static TEST_CACHE_MISSES: AtomicUsize = AtomicUsize::new(0);
+
+    #[test]
+    fn cache_test() {
+        let queue = find_generated_queue("my queue").unwrap().unwrap();
+        assert_eq!(TEST_CACHE_HITS.load(Ordering::Relaxed), 0);
+        assert_eq!(TEST_CACHE_MISSES.load(Ordering::Relaxed), 1);
+        let cached = find_generated_queue("my queue").unwrap().unwrap();
+        assert_eq!(queue, cached);
+        assert_eq!(TEST_CACHE_HITS.load(Ordering::Relaxed), 1);
+        assert_eq!(TEST_CACHE_MISSES.load(Ordering::Relaxed), 1);
+    }
+
+    cached_control!{
+        TEST_CACHE: TimedCache<String, Queue> = TimedCache::with_lifespan(10);
+
+        Key = { queue_name.to_string() };
+
+        PostGet(cached_val) = {
+            TEST_CACHE_HITS.fetch_add(1, Ordering::Relaxed);
+            return Ok(Some(cached_val.clone()))
+        };
+
+        PostExec(body_result) = {
+            match body_result {
+                Ok(Some(v)) => v,
+                Ok(None) => return Ok(None),
+                Err(e) => return Err(e),
+            }
+        };
+
+        Set(set_value) = { set_value.clone() };
+
+        Return(return_value) = {
+            Ok(Some(return_value))
+        };
+
+        fn find_generated_queue(queue_name: &str) -> QueryResult<Option<Queue>> = {
+            TEST_CACHE_MISSES.fetch_add(1, Ordering::Relaxed);
+            Ok(Some(Queue {
+                id: 1,
+                name: queue_name.to_string(),
+                max_receives: None,
+                dead_letter_queue: None,
+                retention_timeout: pg_interval(30),
+                visibility_timeout: pg_interval(30),
+                message_delay: pg_interval(30),
+                content_based_deduplication: false,
+                created_at: Utc::now().naive_utc(),
+                updated_at: Utc::now().naive_utc(),
+            }))
+        }
     }
 }

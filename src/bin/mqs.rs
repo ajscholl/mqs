@@ -1,68 +1,79 @@
-#![feature(proc_macro_hygiene, decl_macro)]
+#![feature(async_closure)]
 extern crate mqs;
 
 #[macro_use] extern crate log;
-#[macro_use] extern crate rocket;
 extern crate dotenv;
 
+use std::convert::Infallible;
+use std::net::SocketAddr;
+use std::sync::Arc;
 use dotenv::dotenv;
-use std::env;
-use std::env::VarError;
-use rocket::Config;
-use rocket::config::{Environment, Limits};
-use rocket::logger::LoggingLevel;
+use hyper::{Body, Request, Response, Server};
+use hyper::service::{make_service_fn, service_fn};
+use hyper::server::conn::AddrStream;
+use log::Level;
 
-use mqs::connection::init_pool;
-use mqs::routes::*;
+use mqs::logger::json::Logger;
+use mqs::router::Router;
+use mqs::router::handler::{handle, make_router};
+use mqs::connection::{init_pool, Pool, DbConn};
+use tokio::runtime::Builder;
+
+struct HandlerService {
+    pool: Pool,
+    router: Router<DbConn>,
+}
+
+impl HandlerService {
+    async fn handle(&self, req: Request<Body>) -> Result<Response<Body>, Infallible> {
+        let conn = self.pool.get().map_or_else(|_| None, |conn| Some(DbConn(conn)));
+        handle(conn, &self.router, req).await
+    }
+}
+
+static LOGGER: Logger = Logger { level: Level::Info };
 
 fn main() {
     dotenv().ok();
 
-    let run_env = match env::var("ENV") {
-        Err(VarError::NotPresent) => {
-            info!("No environment given, defaulting to development");
-            Environment::Development
-        },
-        Err(err) => {
-            error!("Failed to get ENV variable: {}, defaulting to development", err);
-            Environment::Development
-        },
-        Ok(name) => {
-            if name == "prod" || name == "production" {
-                Environment::Production
-            } else if name == "staging" || name == "sandbox" {
-                Environment::Staging
-            } else if name == "dev" || name == "development" {
-                Environment::Development
-            } else {
-                info!("Unknown environment {} given, expecting prod, staging or dev, defaulting to development", name);
-                Environment::Development
-            }
-        },
-    };
+    log::set_logger(&LOGGER)
+        .map(|()| log::set_max_level(LOGGER.level.to_level_filter())).unwrap();
 
     let (pool, pool_size) = init_pool();
+    let mut rt = Builder::new()
+        .enable_all()
+        .threaded_scheduler()
+        .core_threads(pool_size as usize)
+        .build()
+        .unwrap();
 
-    let config = Config::build(run_env)
-        .address("0.0.0.0")
-        .port(7843)
-        .keep_alive(0)
-        .workers(pool_size)
-        .log_level(LoggingLevel::Normal)
-        .limits(Limits::new().limit("forms", 1024 * 1024).limit("json", 1024 * 1024))
-        .finalize()
-        .expect("Unwrapping server config");
+    rt.block_on(async {
+        // Setup and configure server...
+        let addr = SocketAddr::from(([0, 0, 0, 0], 7843));
+        let service = Arc::new(HandlerService { pool: pool, router: make_router() });
+        let make_service = make_service_fn(move |conn: &AddrStream| {
+            let remote_addr = conn.remote_addr();
+            info!("New connection from {}", remote_addr);
+            let conn_service = Arc::clone(&service);
+            async move {
+                Ok::<_, Infallible>(service_fn(move |req| {
+                    let req_service = Arc::clone(&conn_service);
+                    async move {
+                        req_service.handle(req).await
+                    }
+                }))
+            }
+        });
 
-    rocket::custom(config)
-        .manage(pool)
-        .mount("/", routes![health::health])
-        .mount("/", routes![queues::new_queue])
-        .mount("/", routes![queues::update_queue])
-        .mount("/", routes![queues::delete_queue])
-        .mount("/", routes![queues::list_queues])
-        .mount("/", routes![queues::describe_queue])
-        .mount("/", routes![messages::publish_messages])
-        .mount("/", routes![messages::receive_messages])
-        .mount("/", routes![messages::delete_message])
-        .launch();
+        let server = Server::bind(&addr)
+            .http1_keepalive(true)
+            .serve(make_service);
+
+        info!("Started server on {} with a pool of size {}", addr, pool_size);
+
+        // And run forever...
+        if let Err(e) = server.await {
+            error!("server error: {}", e);
+        }
+    })
 }

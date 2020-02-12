@@ -1,7 +1,7 @@
 use hyper::{Client, Body, Request, Method, Response, HeaderMap};
 use hyper::client::HttpConnector;
 use hyper::body::{HttpBody, Buf};
-use hyper::header::{HeaderValue, HeaderName};
+use hyper::header::{HeaderValue, HeaderName, CONNECTION};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use serde::Deserialize;
@@ -89,10 +89,11 @@ impl Service {
         let mut req = Request::new(body);
         *req.uri_mut() = uri.parse()?;
         *req.method_mut() = method;
+        req.headers_mut().insert(CONNECTION, HeaderValue::from_static("keep-alive"));
         Ok(req)
     }
 
-    async fn read_body(body: &mut Body) -> Result<Vec<u8>, hyper::error::Error> {
+    pub async fn read_body(body: &mut Body) -> Result<Vec<u8>, hyper::error::Error> {
         let mut chunks = Vec::new();
         let mut total_length = 0;
 

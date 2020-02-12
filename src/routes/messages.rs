@@ -1,17 +1,13 @@
-use rocket::http::{Header, Status};
-use rocket::{response, Request, Response, Data};
-use rocket::request::{FromRequest, Outcome};
-use rocket::response::Responder;
-use std::io::{Cursor, Read};
-use hyper::HeaderMap;
-use hyper::header::{HeaderName, HeaderValue};
+use hyper::{HeaderMap, Body};
+use hyper::header::{HeaderName, HeaderValue, CONTENT_TYPE};
 
 use crate::multipart;
 use crate::connection::DbConn;
 use crate::models::message::{Message, NewMessage, MessageInput};
-use crate::routes::{ErrorResponder, StatusResponder};
+use crate::routes::MqsResponse;
 use crate::models::queue::Queue;
 use std::borrow::Borrow;
+use crate::status::Status;
 
 const MAX_MESSAGE_SIZE: u64 = 1024 * 1024;
 pub const DEFAULT_CONTENT_TYPE: &'static str = "application/octet-stream";
@@ -21,27 +17,18 @@ pub struct MessageContentType {
     content_type: String,
 }
 
-impl <'a, 'r> FromRequest<'a, 'r> for MessageContentType {
-    type Error = ();
-
-    fn from_request(request: &'a Request<'r>) -> Outcome<Self, <Self as FromRequest<'a, 'r>>::Error> {
-        let content_type = request.headers().get_one("Content-Type");
-        Outcome::Success(MessageContentType {
-            content_type: content_type.unwrap_or(DEFAULT_CONTENT_TYPE).to_string(),
-        })
+impl MessageContentType {
+    pub fn from_hyper(req: &hyper::Request<Body>) -> MessageContentType {
+        MessageContentType {
+            content_type: (match req.headers().get(CONTENT_TYPE) {
+                None => DEFAULT_CONTENT_TYPE,
+                Some(h) => h.to_str().unwrap_or(DEFAULT_CONTENT_TYPE),
+            }).to_string()
+        }
     }
 }
 
-#[post("/messages/<queue_name>", data = "<message>")]
-pub fn publish_messages(conn: DbConn, queue_name: String, message: Data, content_type: MessageContentType) -> StatusResponder {
-    let mut message_content = String::new();
-    match message.open().take(MAX_MESSAGE_SIZE).read_to_string(&mut message_content) {
-        Err(err) => {
-            error!("Failed to read message body into string: {}", err);
-            return StatusResponder::new(Status::BadRequest);
-        },
-        Ok(_) => {},
-    }
+pub fn publish_messages(conn: DbConn, queue_name: &String, message_content: String, content_type: MessageContentType) -> MqsResponse {
     let messages = if let Some(boundary) = multipart::is_multipart(&content_type.content_type) {
         multipart::parse(&boundary, &message_content)
     } else {
@@ -58,16 +45,16 @@ pub fn publish_messages(conn: DbConn, queue_name: String, message: Data, content
     match messages {
         Err(err) => {
             error!("Failed to understand request body: {}", err);
-            StatusResponder::new(Status::BadRequest)
+            MqsResponse::status(Status::BadRequest)
         },
-        Ok(messages) => match Queue::find_by_name(&conn, &queue_name) {
+        Ok(messages) => match Queue::find_by_name_cached(&conn, &queue_name) {
             Err(err) => {
                 error!("Failed to find queue {} for new message: {}", &queue_name, err);
-                StatusResponder::new(Status::InternalServerError)
+                MqsResponse::status(Status::InternalServerError)
             },
             Ok(None) => {
                 error!("No queue with name {} found for new message", &queue_name);
-                StatusResponder::new(Status::NotFound)
+                MqsResponse::status(Status::NotFound)
             },
             Ok(Some(queue)) => {
                 let mut created_some = false;
@@ -81,7 +68,7 @@ pub fn publish_messages(conn: DbConn, queue_name: String, message: Data, content
                     }) {
                         Err(err) => {
                             error!("Failed to insert new message into queue {}: {}", &queue_name, err);
-                            return StatusResponder::new(Status::InternalServerError);
+                            return MqsResponse::status(Status::InternalServerError);
                         },
                         Ok(true) => {
                             debug!("Published new message into queue {}", &queue_name);
@@ -94,104 +81,39 @@ pub fn publish_messages(conn: DbConn, queue_name: String, message: Data, content
                 }
 
                 if created_some {
-                    StatusResponder::new(Status::Created)
+                    MqsResponse::status(Status::Created)
                 } else {
-                    StatusResponder::new(Status::Ok)
+                    MqsResponse::status(Status::Ok)
                 }
             },
         },
     }
 }
 
-#[derive(Debug)]
-pub struct MessageResponder {
-    messages: Vec<Message>,
-}
+pub struct MessageCount(pub i64);
 
-impl MessageResponder {
-    fn new(messages: Vec<Message>) -> MessageResponder {
-        MessageResponder { messages }
-    }
-}
-
-impl <'r> Responder<'r> for MessageResponder {
-    fn respond_to(mut self, _req: &Request) -> response::Result<'r> {
-        if self.messages.len() == 1 {
-            let message = self.messages.pop().unwrap();
-
-            return Response::build()
-                .status(Status::Ok)
-                .header(Header::new("Content-Type", message.content_type))
-                .header(Header::new("X-MQS-MESSAGE-ID", message.id.to_string()))
-                .sized_body(Cursor::new(message.payload))
-                .ok();
-        }
-
-        let messages = self.messages.into_iter().map(|message| {
-            let mut headers = HeaderMap::new();
-            if let Ok(content_type) = HeaderValue::from_str(&message.content_type) {
-                headers.insert(HeaderName::from_static("content-type"), content_type);
-            }
-            if let Ok(id) = HeaderValue::from_str(&message.id.to_string()) {
-                headers.insert(HeaderName::from_static("x-mqs-message-id"), id);
-            }
-            (headers, message.payload.as_bytes().to_vec())
-        }).collect();
-        let (boundary, body) = multipart::encode(&messages);
-
-        Response::build()
-            .status(Status::Ok)
-            .header(Header::new("Content-Type", format!("multipart/mixed; boundary={}", &boundary)))
-            .sized_body(Cursor::new(body))
-            .ok()
-    }
-}
-
-pub struct MessageCount(i64);
-
-impl <'a, 'r> FromRequest<'a, 'r> for MessageCount {
-    type Error = ();
-
-    fn from_request(request: &'a Request<'r>) -> Outcome<Self, <Self as FromRequest<'a, 'r>>::Error> {
-        if let Some(max_messages) = request.headers().get_one("X-MQS-MAX-MESSAGES") {
-            match max_messages.parse() {
-                Err(_) => Outcome::Failure((Status::BadRequest, ())),
-                Ok(n) => if n > 0 && n < 1000 {
-                    Outcome::Success(MessageCount(n))
-                } else {
-                    Outcome::Failure((Status::BadRequest, ()))
-                },
-            }
-        } else {
-            Outcome::Success(MessageCount(1))
-        }
-    }
-}
-
-
-#[get("/messages/<queue_name>")]
-pub fn receive_messages(conn: DbConn, queue_name: String, message_count: Result<MessageCount, ()>) -> Result<MessageResponder, Result<StatusResponder, ErrorResponder>> {
+pub fn receive_messages(conn: DbConn, queue_name: &str, message_count: Result<MessageCount, ()>) -> MqsResponse {
     match message_count {
-        Err(_) => Err(Err(ErrorResponder::new("Failed to parse message count"))),
-        Ok(count) => match Queue::find_by_name(&conn, &queue_name) {
+        Err(_) => MqsResponse::error_static("Failed to parse message count"),
+        Ok(count) => match Queue::find_by_name_cached(&conn, queue_name) {
             Err(err) => {
-                error!("Failed to find queue {} for message receive: {}", &queue_name, err);
-                Err(Ok(StatusResponder::new(Status::InternalServerError)))
+                error!("Failed to find queue {} for message receive: {}", queue_name, err);
+                MqsResponse::status(Status::InternalServerError)
             },
             Ok(None) => {
-                error!("No queue with name {} found for message receive", &queue_name);
-                Err(Ok(StatusResponder::new(Status::NotFound)))
+                error!("No queue with name {} found for message receive", queue_name);
+                MqsResponse::status(Status::NotFound)
             },
             Ok(Some(queue)) => {
-                debug!("Reading 1 message from queue {}", &queue_name);
+                debug!("Reading 1 message from queue {}", queue_name);
                 match Message::get_from_queue(&conn, &queue, count.0) {
                     Ok(messages) => match messages.len() {
-                        0 => Err(Ok(StatusResponder::new(Status::NoContent))),
-                        _ => Ok(MessageResponder::new(messages)),
+                        0 => MqsResponse::status(Status::NoContent),
+                        _ => MqsResponse::messages(messages),
                     },
                     Err(err) => {
-                        error!("Failed reading message from queue {}: {}", &queue_name, err);
-                        Err(Ok(StatusResponder::new(Status::InternalServerError)))
+                        error!("Failed reading message from queue {}: {}", queue_name, err);
+                        MqsResponse::status(Status::InternalServerError)
                     },
                 }
             },
@@ -199,27 +121,26 @@ pub fn receive_messages(conn: DbConn, queue_name: String, message_count: Result<
     }
 }
 
-#[delete("/messages/<message_id>")]
-pub fn delete_message(conn: DbConn, message_id: String) -> Result<StatusResponder, ErrorResponder> {
-    match uuid::Uuid::parse_str(&message_id) {
-        Err(_) => Err(ErrorResponder::new("Message ID needs to be a UUID")),
-        Ok(id) => Ok({
+pub fn delete_message(conn: DbConn, message_id: &str) -> MqsResponse {
+    match uuid::Uuid::parse_str(message_id) {
+        Err(_) => MqsResponse::error_static("Message ID needs to be a UUID"),
+        Ok(id) => {
             info!("Deleting message {}", id);
             let deleted = Message::delete_by_id(&conn, id);
             match deleted {
                 Ok(true) => {
                     info!("Deleted message {}", id);
-                    StatusResponder::new(Status::Ok)
+                    MqsResponse::status(Status::Ok)
                 },
                 Ok(false) => {
                     info!("Message {} was not found", id);
-                    StatusResponder::new(Status::NotFound)
+                    MqsResponse::status(Status::NotFound)
                 },
                 Err(err) => {
                     error!("Failed to delete message {}: {}", id, err);
-                    StatusResponder::new(Status::InternalServerError)
+                    MqsResponse::status(Status::InternalServerError)
                 },
             }
-        }),
+        },
     }
 }

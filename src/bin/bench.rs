@@ -11,8 +11,11 @@ use chrono::Utc;
 use std::ops::Sub;
 use hyper::HeaderMap;
 use hyper::header::{HeaderName, HeaderValue};
+use tokio::runtime::Builder;
 
 type AnyError = Box<dyn std::error::Error + Send + Sync>;
+
+const NUM_THREADS: usize = 25;
 
 #[derive(Debug)]
 struct StringError {
@@ -31,8 +34,6 @@ impl Display for StringError {
     }
 }
 
-unsafe impl Send for StringError {}
-unsafe impl Sync for StringError {}
 impl Error for StringError {}
 
 fn get_service() -> Service {
@@ -40,105 +41,113 @@ fn get_service() -> Service {
     Service::new(&format!("http://{}:7843", &host))
 }
 
-#[tokio::main]
-async fn main() -> Result<(), AnyError> {
-    let s = get_service();
-    let queue_count: usize = 10;
-    let queues = s.get_queues(None, None).await?;
-    // clear data
-    for queue in queues.queues {
-        let result = s.delete_queue(&queue.name).await?;
+fn main() -> Result<(), AnyError> {
+    let mut rt = Builder::new()
+        .enable_all()
+        .threaded_scheduler()
+        .core_threads(NUM_THREADS)
+        .build()
+        .unwrap();
 
-        if result.is_none() {
-            Err(StringError::new("Failed to delete queue"))?;
-        }
-    }
+    rt.block_on(async {
+        let s = get_service();
+        let queue_count: usize = 10;
+        let queues = s.get_queues(None, None).await?;
+        // clear data
+        for queue in queues.queues {
+            let result = s.delete_queue(&queue.name).await?;
 
-    // create some test queues
-    for i in 0..queue_count {
-        let result = s.create_queue(&format!("test-queue-{}", i), &QueueConfig {
-            redrive_policy: None,
-            retention_timeout: 3600,
-            visibility_timeout: 5,
-            message_delay: 0,
-            message_deduplication: false,
-        }).await?;
-
-        if result.is_none() {
-            Err(StringError::new("Failed to create queue"))?;
-        }
-    }
-
-    // update test queues
-    for i in 0..queue_count {
-        let result = s.update_queue(&format!("test-queue-{}", i), &QueueConfig {
-            redrive_policy: None,
-            retention_timeout: 3600,
-            visibility_timeout: 10,
-            message_delay: 0,
-            message_deduplication: false,
-        }).await?;
-
-        if result.is_none() {
-            Err(StringError::new("Failed to update queue"))?;
-        }
-    }
-
-    let start_publish = Utc::now();
-    let mut pending = Vec::with_capacity(queue_count);
-
-    for i in 0..queue_count {
-        let queue = format!("test-queue-{}", i);
-        let queue2 = queue.clone();
-        let handle = tokio::spawn(async {
-            publish_messages(queue2).await.unwrap()
-        });
-        pending.push((queue, handle));
-    }
-
-    for (queue, work) in pending {
-        work.await?;
-        let info = s.describe_queue(&queue).await?;
-        if let Some(description) = info {
-            if description.status.messages != 10000 {
-                Err(StringError::new("Wrong number of messages found"))?;
+            if result.is_none() {
+                Err(StringError::new("Failed to delete queue"))?;
             }
-        } else {
-            Err(StringError::new("Failed to describe queue"))?;
         }
-    }
 
-    let start_consume = Utc::now();
-    let publish_took = start_consume.clone().sub(start_publish);
-    println!("Publishing took: {}", publish_took);
-    let mut pending = Vec::with_capacity(queue_count);
+        // create some test queues
+        for i in 0..queue_count {
+            let result = s.create_queue(&format!("test-queue-{}", i), &QueueConfig {
+                redrive_policy: None,
+                retention_timeout: 3600,
+                visibility_timeout: 5,
+                message_delay: 0,
+                message_deduplication: false,
+            }).await?;
 
-    for i in 0..queue_count {
-        let queue = format!("test-queue-{}", i);
-        let queue2 = queue.clone();
-        let handle = tokio::spawn(async {
-            consume_messages(queue2).await.unwrap()
-        });
-        pending.push((queue, handle));
-    }
-
-    for (queue, work) in pending {
-        work.await?;
-        let info = s.describe_queue(&queue).await?;
-        if let Some(description) = info {
-            if description.status.messages != 0 {
-                Err(StringError::new("Queue not yet empty"))?;
+            if result.is_none() {
+                Err(StringError::new("Failed to create queue"))?;
             }
-        } else {
-            Err(StringError::new("Failed to describe queue"))?;
         }
-    }
 
-    let end_consume = Utc::now();
-    let consume_took = end_consume.sub(start_consume);
-    println!("Consuming took: {}", consume_took);
+        // update test queues
+        for i in 0..queue_count {
+            let result = s.update_queue(&format!("test-queue-{}", i), &QueueConfig {
+                redrive_policy: None,
+                retention_timeout: 3600,
+                visibility_timeout: 10,
+                message_delay: 0,
+                message_deduplication: false,
+            }).await?;
 
-    Ok(())
+            if result.is_none() {
+                Err(StringError::new("Failed to update queue"))?;
+            }
+        }
+
+        let start_publish = Utc::now();
+        let mut pending = Vec::with_capacity(queue_count);
+
+        for i in 0..queue_count {
+            let queue = format!("test-queue-{}", i);
+            let queue2 = queue.clone();
+            let handle = tokio::spawn(async {
+                publish_messages(queue2).await.unwrap()
+            });
+            pending.push((queue, handle));
+        }
+
+        for (queue, work) in pending {
+            work.await?;
+            let info = s.describe_queue(&queue).await?;
+            if let Some(description) = info {
+                if description.status.messages != 10000 {
+                    Err(StringError::new("Wrong number of messages found"))?;
+                }
+            } else {
+                Err(StringError::new("Failed to describe queue"))?;
+            }
+        }
+
+        let start_consume = Utc::now();
+        let publish_took = start_consume.clone().sub(start_publish);
+        println!("Publishing took: {}", publish_took);
+        let mut pending = Vec::with_capacity(queue_count);
+
+        for i in 0..queue_count {
+            let queue = format!("test-queue-{}", i);
+            let queue2 = queue.clone();
+            let handle = tokio::spawn(async {
+                consume_messages(queue2).await.unwrap()
+            });
+            pending.push((queue, handle));
+        }
+
+        for (queue, work) in pending {
+            work.await?;
+            let info = s.describe_queue(&queue).await?;
+            if let Some(description) = info {
+                if description.status.messages != 0 {
+                    Err(StringError::new("Queue not yet empty"))?;
+                }
+            } else {
+                Err(StringError::new("Failed to describe queue"))?;
+            }
+        }
+
+        let end_consume = Utc::now();
+        let consume_took = end_consume.sub(start_consume);
+        println!("Consuming took: {}", consume_took);
+
+        Ok(())
+    })
 }
 
 async fn publish_messages(queue: String) -> Result<(), AnyError> {
@@ -146,18 +155,10 @@ async fn publish_messages(queue: String) -> Result<(), AnyError> {
     let mut headers = HeaderMap::new();
     headers.insert(HeaderName::from_static("content-type"), HeaderValue::from_static("application/json"));
     let message = "{\"data\":\"a test\"}".as_bytes().to_owned();
-    let message_bundle = vec![
-        (headers.clone(), message.clone()),
-        (headers.clone(), message.clone()),
-        (headers.clone(), message.clone()),
-        (headers.clone(), message.clone()),
-        (headers.clone(), message.clone()),
-        (headers.clone(), message.clone()),
-        (headers.clone(), message.clone()),
-        (headers.clone(), message.clone()),
-        (headers.clone(), message.clone()),
-        (headers.clone(), message.clone()),
-    ];
+    let mut message_bundle = Vec::with_capacity(10);
+    for _ in 0..message_bundle.capacity() {
+        message_bundle.push((headers.clone(), message.clone()));
+    }
     for _ in 0..1000 {
         let result = s.publish_messages(&queue, &message_bundle).await?;
         if !result {
@@ -169,7 +170,7 @@ async fn publish_messages(queue: String) -> Result<(), AnyError> {
 }
 
 async fn consume_messages(queue: String) -> Result<(), AnyError> {
-    let mut handles = Vec::with_capacity(10);
+    let mut handles = Vec::with_capacity(NUM_THREADS);
     for _ in 0..handles.capacity() {
         let queue_name = queue.clone();
         let handle = tokio::spawn(async {

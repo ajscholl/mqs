@@ -1,13 +1,12 @@
-use rocket::request::{FromRequest, Outcome};
-use rocket::Request;
-use rocket::http::{RawStr, Status};
-use rocket_contrib::json::{Json, JsonError};
+use std::collections::HashMap;
+use hyper::Body;
 use diesel::pg::types::date_and_time::PgInterval;
 use diesel::QueryResult;
 
 use crate::connection::DbConn;
 use crate::models::queue::{NewQueue, QueueInput, Queue};
-use crate::routes::{ErrorResponder, StatusResponder, JsonResponder};
+use crate::routes::MqsResponse;
+use crate::status::Status;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct QueueRedrivePolicy {
@@ -73,82 +72,79 @@ impl QueueConfig {
     }
 }
 
-#[put("/queues/<queue_name>", data = "<params>", format = "application/json")]
-pub fn new_queue(conn: DbConn, queue_name: String, params: Result<Json<QueueConfig>, JsonError>) -> Result<JsonResponder<QueueConfigOutput>, Result<StatusResponder, ErrorResponder>> {
+pub fn new_queue(conn: DbConn, queue_name: &str, params: Result<QueueConfig, serde_json::Error>) -> MqsResponse {
     match params {
         Err(err) => {
             let err_message = format!("{:?}", err);
             error!("Failed to parse queue params: {}", &err_message);
-            Err(Err(ErrorResponder::new_owned(err_message)))
+            MqsResponse::error_owned(err_message)
         },
-        Ok(Json(config)) => {
-            info!("Creating new queue {}", &queue_name);
-            let created = NewQueue::insert(&conn, &config.to_input(&queue_name));
+        Ok(config) => {
+            info!("Creating new queue {}", queue_name);
+            let created = NewQueue::insert(&conn, &config.to_input(queue_name));
 
             match created {
                 Ok(Some(queue)) => {
-                    info!("Created new queue {}", &queue_name);
-                    Ok(JsonResponder::new(Status::Created, QueueConfigOutput::new(queue)))
+                    info!("Created new queue {}", queue_name);
+                    MqsResponse::status_json(Status::Created, &QueueConfigOutput::new(queue))
                 },
                 Ok(None) => {
-                    info!("Queue {} did already exist", &queue_name);
-                    Err(Ok(StatusResponder::new(Status::Conflict)))
+                    info!("Queue {} did already exist", queue_name);
+                    MqsResponse::status(Status::Conflict)
                 },
                 Err(err) => {
                     error!("Failed to create new queue {}, {:?}: {}", queue_name, config, err);
-                    Err(Ok(StatusResponder::new(Status::InternalServerError)))
+                    MqsResponse::status(Status::InternalServerError)
                 }
             }
         }
     }
 }
 
-#[post("/queues/<queue_name>", data = "<params>", format = "application/json")]
-pub fn update_queue(conn: DbConn, queue_name: String, params: Result<Json<QueueConfig>, JsonError>) -> Result<JsonResponder<QueueConfigOutput>, Result<StatusResponder, ErrorResponder>> {
+pub fn update_queue(conn: DbConn, queue_name: &str, params: Result<QueueConfig, serde_json::Error>) -> MqsResponse {
     match params {
         Err(err) => {
             let err_message = format!("{:?}", err);
             error!("Failed to parse queue params: {}", &err_message);
-            Err(Err(ErrorResponder::new_owned(err_message)))
+            MqsResponse::error_owned(err_message)
         },
-        Ok(Json(config)) => {
-            info!("Updating queue {}", &queue_name);
-            let result = Queue::update(&conn, &config.to_input(&queue_name));
+        Ok(config) => {
+            info!("Updating queue {}", queue_name);
+            let result = Queue::update(&conn, &config.to_input(queue_name));
 
             match result {
                 Ok(Some(queue)) => {
-                    info!("Updated queue {}", &queue_name);
-                    Ok(JsonResponder::new(Status::Ok, QueueConfigOutput::new(queue)))
+                    info!("Updated queue {}", queue_name);
+                    MqsResponse::json(&QueueConfigOutput::new(queue))
                 },
                 Ok(None) => {
-                    info!("Queue {} did not exist", &queue_name);
-                    Err(Ok(StatusResponder::new(Status::NotFound)))
+                    info!("Queue {} did not exist", queue_name);
+                    MqsResponse::status(Status::NotFound)
                 },
                 Err(err) => {
                     error!("Failed to update queue {}, {:?}: {}", queue_name, config, err);
-                    Err(Ok(StatusResponder::new(Status::InternalServerError)))
+                    MqsResponse::status(Status::InternalServerError)
                 }
             }
         }
     }
 }
 
-#[delete("/queues/<queue_name>")]
-pub fn delete_queue(conn: DbConn, queue_name: String) -> Result<JsonResponder<QueueConfigOutput>, StatusResponder> {
-    info!("Deleting queue {}", &queue_name);
-    let deleted = Queue::delete_by_name(&conn, &queue_name);
+pub fn delete_queue(conn: DbConn, queue_name: &str) -> MqsResponse {
+    info!("Deleting queue {}", queue_name);
+    let deleted = Queue::delete_by_name(&conn, queue_name);
     match deleted {
         Ok(Some(queue)) => {
-            info!("Deleted queue {}", &queue_name);
-            Ok(JsonResponder::new(Status::Ok, QueueConfigOutput::new(queue)))
+            info!("Deleted queue {}", queue_name);
+            MqsResponse::json(&QueueConfigOutput::new(queue))
         },
         Ok(None) => {
-            info!("Message {} was not found", &queue_name);
-            Err(StatusResponder::new(Status::NotFound))
+            info!("Message {} was not found", queue_name);
+            MqsResponse::status(Status::NotFound)
         },
         Err(err) => {
-            error!("Failed to delete queue {}: {}", &queue_name, err);
-            Err(StatusResponder::new(Status::InternalServerError))
+            error!("Failed to delete queue {}: {}", queue_name, err);
+            MqsResponse::status(Status::InternalServerError)
         },
     }
 }
@@ -159,25 +155,29 @@ pub struct QueuesRange {
     limit: Option<i64>,
 }
 
-fn check_option<T, E>(value: Option<Result<T, E>>) -> Result<Option<T>, E> {
-    match value {
-        None => Ok(None),
-        Some(Ok(val)) => Ok(Some(val)),
-        Some(Err(err)) => Err(err),
-    }
-}
+impl QueuesRange {
+    pub fn from_hyper(req: hyper::Request<Body>) -> Result<QueuesRange, String> {
+        let query = req.uri().query().unwrap_or("");
+        let mut query_params = HashMap::new();
+        for param in query.split("&").into_iter() {
+            if param.is_empty() {
+                continue;
+            }
 
-impl <'a, 'r> FromRequest<'a, 'r> for QueuesRange {
-    type Error = String;
-
-    fn from_request(request: &'a Request<'r>) -> Outcome<Self, <Self as FromRequest<'a, 'r>>::Error> {
-        let offset = check_option::<i64, &RawStr>(request.get_query_value("offset"));
-        let limit = check_option::<i64, &RawStr>(request.get_query_value("limit"));
+            // TODO: add proper query param parsing and url param decoding
+            let mut i = param.splitn(2, "=").into_iter();
+            let name = i.next().unwrap_or("");
+            let value = i.next().unwrap_or("");
+            debug_assert!(i.next().is_none());
+            query_params.insert(name, value);
+        }
+        let offset = query_params.get("offset").map_or_else(|| Ok(None), |s| s.parse().map_or_else(|e| Err(e), |v| Ok(Some(v))));
+        let limit = query_params.get("limit").map_or_else(|| Ok(None), |s| s.parse().map_or_else(|e| Err(e), |v| Ok(Some(v))));
 
         match (offset, limit) {
-            (Err(err), _) => Outcome::Failure((Status::BadRequest, format!("invalid value for number field offset: {}", err))),
-            (_, Err(err)) => Outcome::Failure((Status::BadRequest, format!("invalid value for number field limit: {}", err))),
-            (Ok(offset), Ok(limit)) => Outcome::Success(QueuesRange {
+            (Err(err), _) => Err(format!("invalid value for number field offset: {}", err)),
+            (_, Err(err)) => Err(format!("invalid value for number field limit: {}", err)),
+            (Ok(offset), Ok(limit)) => Ok(QueuesRange {
                 offset,
                 limit,
             })
@@ -206,16 +206,15 @@ fn list_queues_and_count(conn: DbConn, range: &QueuesRange) -> QueryResult<Queue
     })
 }
 
-#[get("/queues")]
-pub fn list_queues(conn: DbConn, range: Result<QueuesRange, String>) -> Result<Result<JsonResponder<QueuesResponse>, ErrorResponder>, StatusResponder> {
+pub fn list_queues(conn: DbConn, range: Result<QueuesRange, String>) -> MqsResponse {
     match range {
-        Err(err) => Ok(Err(ErrorResponder::new_owned(err))),
+        Err(err) => MqsResponse::error_owned(err),
         Ok(range) => match list_queues_and_count(conn, &range) {
-            Ok(response) => Ok(Ok(JsonResponder::new(Status::Ok, response))),
+            Ok(response) => MqsResponse::json(&response),
             Err(err) => {
                 error!("Failed to read range of queues {:?}-{:?}: {}", range.offset, range.limit, err);
 
-                Err(StatusResponder::new(Status::InternalServerError))
+                MqsResponse::status(Status::InternalServerError)
             },
         },
     }
@@ -259,14 +258,13 @@ impl QueueDescription {
     }
 }
 
-#[get("/queues/<queue_name>")]
-pub fn describe_queue(conn: DbConn, queue_name: String) -> Result<JsonResponder<QueueDescription>, StatusResponder> {
-    match Queue::describe(&conn, &queue_name) {
+pub fn describe_queue(conn: DbConn, queue_name: &str) -> MqsResponse {
+    match Queue::describe(&conn, queue_name) {
         Err(err) => {
-            error!("Failed to describe queue {}: {}", &queue_name, err);
-            Err(StatusResponder::new(Status::InternalServerError))
+            error!("Failed to describe queue {}: {}", queue_name, err);
+            MqsResponse::status(Status::InternalServerError)
         },
-        Ok(None) => Err(StatusResponder::new(Status::NotFound)),
-        Ok(Some(description)) => Ok(JsonResponder::new(Status::Ok, QueueDescription::new(description.queue, description.messages, description.visible_messages, description.oldest_message_age))),
+        Ok(None) => MqsResponse::status(Status::NotFound),
+        Ok(Some(description)) => MqsResponse::json(&QueueDescription::new(description.queue, description.messages, description.visible_messages, description.oldest_message_age)),
     }
 }

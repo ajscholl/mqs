@@ -1,11 +1,11 @@
-use rocket::{response, Response};
-use rocket::response::Responder;
-use rocket::Request;
-use rocket::http::{Header, Status};
-use std::io::Cursor;
 use serde::Serialize;
+use hyper::{Body, HeaderMap};
+use hyper::header::{CONTENT_TYPE, HeaderValue, HeaderName};
 
-pub mod health;
+use crate::models::message::Message;
+use crate::multipart;
+use crate::status::Status;
+
 pub mod messages;
 pub mod queues;
 
@@ -15,77 +15,85 @@ pub struct ErrorResponse<'a> {
 }
 
 #[derive(Debug)]
-pub enum ErrorResponder {
-    StaticError(&'static str),
-    OwnedError(String),
+pub enum MqsResponse {
+    StatusResponse(Status),
+    JsonResponse(Status, String),
+    MessageResponse(Status, Vec<Message>),
 }
 
-impl ErrorResponder {
-    pub fn new(error: &'static str) -> ErrorResponder {
-        ErrorResponder::StaticError(error)
+impl MqsResponse {
+    pub fn status(status: Status) -> Self {
+        MqsResponse::StatusResponse(status)
     }
 
-    pub fn new_owned(error: String) -> ErrorResponder {
-        ErrorResponder::OwnedError(error)
+    pub fn error_static(error: &'static str) -> Self {
+        Self::status_json(Status::BadRequest, &ErrorResponse { error })
     }
-}
 
-impl <'r> Responder<'r> for ErrorResponder {
-    fn respond_to(self, req: &Request) -> response::Result<'r> {
-        match self {
-            ErrorResponder::StaticError(error) => JsonResponder::new(Status::BadRequest, ErrorResponse { error }).respond_to(req),
-            ErrorResponder::OwnedError(error) => JsonResponder::new(Status::BadRequest, ErrorResponse { error: &error }).respond_to(req),
-        }
+    pub fn error_owned(error: String) -> Self {
+        Self::status_json(Status::BadRequest, &ErrorResponse { error: &error })
     }
-}
 
-#[derive(Debug)]
-pub struct StatusResponder {
-    status: Status,
-}
-
-impl StatusResponder {
-    pub fn new(status: Status) -> StatusResponder {
-        StatusResponder {
-            status,
-        }
+    pub fn json<T: Serialize>(body: &T) -> Self {
+        Self::status_json(Status::Ok, body)
     }
-}
 
-impl <'r> Responder<'r> for StatusResponder {
-    fn respond_to(self, _req: &Request) -> response::Result<'r> {
-        Response::build().status(self.status).ok()
-    }
-}
-
-#[derive(Debug)]
-pub struct JsonResponder<T> {
-    status: Status,
-    body: T,
-}
-
-impl <T> JsonResponder<T> {
-    pub fn new(status: Status, body: T) -> JsonResponder<T> {
-        JsonResponder {
-            status,
-            body,
-        }
-    }
-}
-
-impl <'r, T> Responder<'r> for JsonResponder<T> where T: Serialize {
-    fn respond_to(self, _req: &Request) -> response::Result<'r> {
-        match serde_json::to_string(&self.body) {
+    pub fn status_json<T: Serialize>(status: Status, body: &T) -> Self {
+        match serde_json::to_string(body) {
             Err(err) => {
                 error!("Failed to serialize json response: {}", err);
 
-                Response::build().status(Status::InternalServerError).ok()
+                MqsResponse::StatusResponse(Status::InternalServerError)
             },
-            Ok(body) => Response::build()
-                .status(self.status)
-                .header(Header::new("Content-Type", "application/json"))
-                .sized_body(Cursor::new(body))
-                .ok()
+            Ok(json) => MqsResponse::JsonResponse(status, json),
+        }
+    }
+
+    pub fn messages(messages: Vec<Message>) -> Self {
+        MqsResponse::MessageResponse(Status::Ok, messages)
+    }
+
+    pub fn into_response(self) -> hyper::Response<Body> {
+        match self {
+            MqsResponse::StatusResponse(status) => {
+                let mut res = hyper::Response::new(Body::default());
+                *res.status_mut() = status.to_hyper();
+                res
+            },
+            MqsResponse::JsonResponse(status, body) => {
+                let mut res = hyper::Response::new(Body::from(body));
+                *res.status_mut() = status.to_hyper();
+                res.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                res
+            },
+            MqsResponse::MessageResponse(status, mut messages) => {
+                if messages.len() == 1 {
+                    let message = messages.pop().unwrap();
+
+                    let mut res = hyper::Response::new(Body::from(message.payload));
+                    *res.status_mut() = status.to_hyper();
+                    res.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_str(&message.content_type).unwrap());
+                    res.headers_mut().insert("X-MQS-MESSAGE-ID", HeaderValue::from_str(&message.id.to_string()).unwrap());
+                    return res;
+                }
+
+                let message_parts = messages.into_iter().map(|message| {
+                    let mut headers = HeaderMap::new();
+                    if let Ok(content_type) = HeaderValue::from_str(&message.content_type) {
+                        headers.insert(HeaderName::from_static("content-type"), content_type);
+                    }
+                    if let Ok(id) = HeaderValue::from_str(&message.id.to_string()) {
+                        headers.insert(HeaderName::from_static("x-mqs-message-id"), id);
+                    }
+                    (headers, message.payload.as_bytes().to_vec())
+                }).collect();
+                let (boundary, body) = multipart::encode(&message_parts);
+
+                let mut res = hyper::Response::new(Body::from(body));
+                *res.status_mut() = status.to_hyper();
+                res.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_str(&format!("multipart/mixed; boundary={}", &boundary)).unwrap());
+                res
+            },
         }
     }
 }
