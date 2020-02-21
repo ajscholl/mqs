@@ -10,7 +10,7 @@ use std::env;
 use chrono::Utc;
 use std::ops::Sub;
 use hyper::HeaderMap;
-use hyper::header::{HeaderName, HeaderValue};
+use hyper::header::{HeaderValue, CONTENT_TYPE, CONTENT_ENCODING};
 use tokio::runtime::Builder;
 
 type AnyError = Box<dyn std::error::Error + Send + Sync>;
@@ -150,11 +150,16 @@ fn main() -> Result<(), AnyError> {
     })
 }
 
+const DEFAULT_MESSAGE: &'static str = "{\"data\":\"a test\"}";
+const DEFAULT_MESSAGE_CONTENT_TYPE: &'static str = "application/json";
+const DEFAULT_MESSAGE_CONTENT_ENCODING: &'static str = "identity";
+
 async fn publish_messages(queue: String) -> Result<(), AnyError> {
     let s = get_service();
     let mut headers = HeaderMap::new();
-    headers.insert(HeaderName::from_static("content-type"), HeaderValue::from_static("application/json"));
-    let message = "{\"data\":\"a test\"}".as_bytes().to_owned();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static(DEFAULT_MESSAGE_CONTENT_TYPE));
+    headers.insert(CONTENT_ENCODING, HeaderValue::from_static(DEFAULT_MESSAGE_CONTENT_ENCODING));
+    let message = DEFAULT_MESSAGE.as_bytes().to_owned();
     let mut message_bundle = Vec::with_capacity(10);
     for _ in 0..message_bundle.capacity() {
         message_bundle.push((headers.clone(), message.clone()));
@@ -182,6 +187,18 @@ async fn consume_messages(queue: String) -> Result<(), AnyError> {
                     break;
                 }
                 for message in messages {
+                    if &message.content_type != DEFAULT_MESSAGE_CONTENT_TYPE {
+                        Err(StringError::new("Message content type does not match"))?;
+                    }
+                    if message.content_encoding.is_none() {
+                        Err(StringError::new("Message content encoding missing"))?;
+                    }
+                    if message.content_encoding.unwrap().as_str() != DEFAULT_MESSAGE_CONTENT_ENCODING {
+                        Err(StringError::new("Message content encoding does not match"))?;
+                    }
+                    if message.content.as_slice() != DEFAULT_MESSAGE.as_bytes() {
+                        Err(StringError::new("Message content does not match"))?;
+                    }
                     let deleted = s.delete_message(&message.message_id).await?;
 
                     if !deleted {

@@ -1,7 +1,7 @@
 use hyper::{Client, Body, Request, Method, Response, HeaderMap};
 use hyper::client::HttpConnector;
 use hyper::body::{HttpBody, Buf};
-use hyper::header::{HeaderValue, HeaderName, CONNECTION};
+use hyper::header::{HeaderValue, HeaderName, CONNECTION, CONTENT_TYPE, CONTENT_ENCODING};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use serde::Deserialize;
@@ -74,6 +74,7 @@ pub struct Service {
 pub struct MessageResponse {
     pub message_id: String,
     pub content_type: String,
+    pub content_encoding: Option<String>,
     pub content: Vec<u8>,
 }
 
@@ -189,13 +190,17 @@ impl Service {
         let message_id = headers.get("X-MQS-MESSAGE-ID").map_or_else(|| "", |h| {
             h.to_str().unwrap_or("")
         }).to_string();
-        let content_type = headers.get("Content-Type").map_or_else(|| DEFAULT_CONTENT_TYPE, |h| {
+        let content_type = headers.get(CONTENT_TYPE).map_or_else(|| DEFAULT_CONTENT_TYPE, |h| {
             h.to_str().unwrap_or(DEFAULT_CONTENT_TYPE)
         }).to_string();
+        let content_encoding = headers.get(CONTENT_ENCODING).map_or_else(|| None, |h| {
+            h.to_str().map_or_else(|_| None, |s| Some(s.to_string()))
+        });
         let content = get_body()?;
         Ok(MessageResponse {
             message_id,
             content_type,
+            content_encoding,
             content,
         })
     }

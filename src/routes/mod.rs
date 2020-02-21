@@ -1,6 +1,6 @@
 use serde::Serialize;
 use hyper::{Body, HeaderMap};
-use hyper::header::{CONTENT_TYPE, HeaderValue, HeaderName};
+use hyper::header::{CONTENT_TYPE, HeaderValue, HeaderName, CONTENT_ENCODING};
 
 use crate::models::message::Message;
 use crate::multipart;
@@ -70,21 +70,16 @@ impl MqsResponse {
                 if messages.len() == 1 {
                     let message = messages.pop().unwrap();
 
-                    let mut res = hyper::Response::new(Body::from(message.payload));
+                    let mut res = hyper::Response::new(Body::default());
                     *res.status_mut() = status.to_hyper();
-                    res.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_str(&message.content_type).unwrap());
-                    res.headers_mut().insert("X-MQS-MESSAGE-ID", HeaderValue::from_str(&message.id.to_string()).unwrap());
+                    Self::add_message_headers(res.headers_mut(), &message);
+                    *res.body_mut() = Body::from(message.payload);
                     return res;
                 }
 
                 let message_parts = messages.into_iter().map(|message| {
                     let mut headers = HeaderMap::new();
-                    if let Ok(content_type) = HeaderValue::from_str(&message.content_type) {
-                        headers.insert(HeaderName::from_static("content-type"), content_type);
-                    }
-                    if let Ok(id) = HeaderValue::from_str(&message.id.to_string()) {
-                        headers.insert(HeaderName::from_static("x-mqs-message-id"), id);
-                    }
+                    Self::add_message_headers(&mut headers, &message);
                     (headers, message.payload)
                 }).collect();
                 let (boundary, body) = multipart::encode(&message_parts);
@@ -94,6 +89,20 @@ impl MqsResponse {
                 res.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_str(&format!("multipart/mixed; boundary={}", &boundary)).unwrap());
                 res
             },
+        }
+    }
+
+    fn add_message_headers(headers: &mut HeaderMap, message: &Message) {
+        if let Ok(value) = HeaderValue::from_str(&message.content_type) {
+            headers.insert(CONTENT_TYPE, value);
+        }
+        if let Some(content_encoding) = &message.content_encoding {
+            if let Ok(value) = HeaderValue::from_str(content_encoding) {
+                headers.insert(CONTENT_ENCODING, value);
+            }
+        }
+        if let Ok(value) = HeaderValue::from_str(&message.id.to_string()) {
+            headers.insert(HeaderName::from_static("x-mqs-message-id"), value);
         }
     }
 }

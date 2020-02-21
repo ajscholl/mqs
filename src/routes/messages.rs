@@ -1,5 +1,5 @@
-use hyper::{HeaderMap, Body};
-use hyper::header::{HeaderName, HeaderValue, CONTENT_TYPE};
+use hyper::HeaderMap;
+use hyper::header::{HeaderValue, CONTENT_TYPE, CONTENT_ENCODING};
 
 use crate::multipart;
 use crate::connection::DbConn;
@@ -11,35 +11,17 @@ use crate::status::Status;
 const MAX_MESSAGE_SIZE: u64 = 1024 * 1024;
 pub const DEFAULT_CONTENT_TYPE: &'static str = "application/octet-stream";
 
-#[derive(Debug)]
-pub struct MessageContentType {
-    content_type: String,
+fn boundary_from_headers(headers: &HeaderMap<HeaderValue>) -> Option<String> {
+    let content_type_header = headers.get(CONTENT_TYPE)?;
+    let content_type = content_type_header.to_str().map_or_else(|_| None, |s| Some(s))?;
+    multipart::is_multipart(content_type)
 }
 
-impl MessageContentType {
-    pub fn from_hyper(req: &hyper::Request<Body>) -> MessageContentType {
-        MessageContentType {
-            content_type: (match req.headers().get(CONTENT_TYPE) {
-                None => DEFAULT_CONTENT_TYPE,
-                Some(h) => h.to_str().unwrap_or(DEFAULT_CONTENT_TYPE),
-            }).to_string()
-        }
-    }
-}
-
-pub fn publish_messages(conn: DbConn, queue_name: &String, message_content: &[u8], content_type: MessageContentType) -> MqsResponse {
-    let messages = if let Some(boundary) = multipart::is_multipart(&content_type.content_type) {
+pub fn publish_messages(conn: DbConn, queue_name: &String, message_content: &[u8], headers: HeaderMap<HeaderValue>) -> MqsResponse {
+    let messages = if let Some(boundary) = boundary_from_headers(&headers) {
         multipart::parse(boundary.as_bytes(), message_content)
     } else {
-        Ok(vec![
-            ({
-                 let mut headers = HeaderMap::new();
-                 if let Ok(value) = HeaderValue::from_str(&content_type.content_type) {
-                     headers.insert(HeaderName::from_static("content-type"), value);
-                 }
-                 headers
-             }, message_content),
-        ])
+        Ok(vec![(headers, message_content)])
     };
     match messages {
         Err(err) => {
@@ -58,12 +40,14 @@ pub fn publish_messages(conn: DbConn, queue_name: &String, message_content: &[u8
             Ok(Some(queue)) => {
                 let mut created_some = false;
 
-                for message in messages {
+                for (message_headers, message_payload) in messages {
                     info!("Inserting new message into queue {}", &queue_name);
                     match NewMessage::insert(&conn, &queue, &MessageInput {
-                        content_type: message.0.get("Content-Type")
+                        content_type: message_headers.get(CONTENT_TYPE)
                             .map_or_else(|| DEFAULT_CONTENT_TYPE, |v| v.to_str().unwrap_or(DEFAULT_CONTENT_TYPE)),
-                        payload: message.1,
+                        content_encoding: message_headers.get(CONTENT_ENCODING)
+                            .map_or_else(|| None, |v| v.to_str().map_or_else(|_| None, |s| Some(s))),
+                        payload: message_payload,
                     }) {
                         Err(err) => {
                             error!("Failed to insert new message into queue {}: {}", &queue_name, err);

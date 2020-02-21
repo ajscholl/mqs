@@ -18,6 +18,7 @@ use crate::models::queue::Queue;
 pub struct MessageInput<'a> {
     pub payload: &'a [u8],
     pub content_type: &'a str,
+    pub content_encoding: Option<&'a str>,
 }
 
 #[derive(Insertable)]
@@ -26,6 +27,7 @@ pub struct NewMessage<'a> {
     pub id: Uuid,
     pub payload: &'a [u8],
     pub content_type: &'a str,
+    pub content_encoding: Option<&'a str>,
     pub hash: Option<String>,
     pub queue: &'a str,
     pub receives: i32,
@@ -38,6 +40,7 @@ pub struct Message {
     pub id: Uuid,
     pub payload: Vec<u8>,
     pub content_type: String,
+    pub content_encoding: Option<String>,
     pub hash: Option<String>,
     pub queue: String,
     pub receives: i32,
@@ -68,6 +71,7 @@ impl <'a> NewMessage<'a> {
                 id,
                 payload: input.payload,
                 content_type: input.content_type,
+                content_encoding: input.content_encoding,
                 hash,
                 queue: &queue.name,
                 receives: 0,

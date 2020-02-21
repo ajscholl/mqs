@@ -3,6 +3,7 @@ table! {
         id -> Uuid,
         payload -> Bytea,
         content_type -> Varchar,
+        content_encoding -> Nullable<Varchar>,
         hash -> Nullable<Varchar>,
         queue -> Varchar,
         receives -> Int4,

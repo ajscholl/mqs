@@ -1,7 +1,7 @@
 use crate::router::Handler;
 use hyper::{Response, Request, Body};
 use crate::connection::DbConn;
-use crate::routes::messages::{delete_message, receive_messages, MessageCount, publish_messages, MessageContentType};
+use crate::routes::messages::{delete_message, receive_messages, MessageCount, publish_messages};
 
 pub struct ReceiveMessagesHandler {
     pub queue_name: String,
@@ -47,9 +47,8 @@ impl Handler<DbConn> for PublishMessagesHandler {
     }
 
     fn handle(&self, conn: DbConn, req: Request<Body>, body: Vec<u8>) -> Response<Body> {
-        let content_type = MessageContentType::from_hyper(&req);
-
-        publish_messages(conn, &self.queue_name, body.as_slice(), content_type).into_response()
+        let (parts, _) = req.into_parts();
+        publish_messages(conn, &self.queue_name, body.as_slice(), parts.headers).into_response()
     }
 }
 
