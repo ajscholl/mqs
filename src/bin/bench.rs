@@ -98,8 +98,8 @@ fn main() -> Result<(), AnyError> {
         for i in 0..queue_count {
             let queue = format!("test-queue-{}", i);
             let queue2 = queue.clone();
-            let handle = tokio::spawn(async {
-                publish_messages(queue2).await.unwrap()
+            let handle = tokio::spawn(async move {
+                publish_messages(i, queue2).await.unwrap()
             });
             pending.push((queue, handle));
         }
@@ -124,8 +124,8 @@ fn main() -> Result<(), AnyError> {
         for i in 0..queue_count {
             let queue = format!("test-queue-{}", i);
             let queue2 = queue.clone();
-            let handle = tokio::spawn(async {
-                consume_messages(queue2).await.unwrap()
+            let handle = tokio::spawn(async move {
+                consume_messages(i, queue2).await.unwrap()
             });
             pending.push((queue, handle));
         }
@@ -150,21 +150,35 @@ fn main() -> Result<(), AnyError> {
     })
 }
 
-const DEFAULT_MESSAGE: &'static str = "{\"data\":\"a test\"}";
-const DEFAULT_MESSAGE_CONTENT_TYPE: &'static str = "application/json";
-const DEFAULT_MESSAGE_CONTENT_ENCODING: &'static str = "identity";
+const DEFAULT_MESSAGE: [&'static [u8]; 3] = [
+    "{\"data\":\"a test\"}".as_bytes(),
+    &[6, 3, 6, 8, 0, 0, 0, 1, 5, 22, 254, 0, 32, 100, 128, 0],
+    &[1, 2, 5, 3, 7, 4, 98, 66, 127, 0, 255, 192],
+];
+const DEFAULT_MESSAGE_CONTENT_TYPE: [&'static str; 3] = [
+    "application/json",
+    "text/html",
+    "image/png",
+];
+const DEFAULT_MESSAGE_CONTENT_ENCODING: [Option<&'static str>; 3] = [
+    Some("identity"),
+    Some("gzip"),
+    None,
+];
 
-async fn publish_messages(queue: String) -> Result<(), AnyError> {
+async fn publish_messages(index: usize, queue: String) -> Result<(), AnyError> {
     let s = get_service();
     let mut headers = HeaderMap::new();
-    headers.insert(CONTENT_TYPE, HeaderValue::from_static(DEFAULT_MESSAGE_CONTENT_TYPE));
-    headers.insert(CONTENT_ENCODING, HeaderValue::from_static(DEFAULT_MESSAGE_CONTENT_ENCODING));
-    let message = DEFAULT_MESSAGE.as_bytes().to_owned();
-    let mut message_bundle = Vec::with_capacity(10);
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static(DEFAULT_MESSAGE_CONTENT_TYPE[index % DEFAULT_MESSAGE_CONTENT_TYPE.len()]));
+    if let Some(value) = DEFAULT_MESSAGE_CONTENT_ENCODING[index % DEFAULT_MESSAGE_CONTENT_ENCODING.len()] {
+        headers.insert(CONTENT_ENCODING, HeaderValue::from_static(value));
+    }
+    let message = DEFAULT_MESSAGE[index % DEFAULT_MESSAGE.len()].to_owned();
+    let mut message_bundle = Vec::with_capacity(if index > 5 { 10 } else { 1 });
     for _ in 0..message_bundle.capacity() {
         message_bundle.push((headers.clone(), message.clone()));
     }
-    for _ in 0..1000 {
+    for _ in 0..10000 / message_bundle.len() {
         let result = s.publish_messages(&queue, &message_bundle).await?;
         if !result {
             Err(StringError::new("Expected successful publish"))?;
@@ -174,29 +188,37 @@ async fn publish_messages(queue: String) -> Result<(), AnyError> {
     Ok(())
 }
 
-async fn consume_messages(queue: String) -> Result<(), AnyError> {
+async fn consume_messages(index: usize, queue: String) -> Result<(), AnyError> {
     let mut handles = Vec::with_capacity(NUM_THREADS);
     for _ in 0..handles.capacity() {
         let queue_name = queue.clone();
-        let handle = tokio::spawn(async {
+        let handle = tokio::spawn(async move {
             let s = get_service();
-            let queue2 = queue_name;
             loop {
-                let messages = s.get_messages(&queue2, 10).await?;
+                let messages = s.get_messages(&queue_name, 10).await?;
                 if messages.is_empty() {
                     break;
                 }
                 for message in messages {
-                    if &message.content_type != DEFAULT_MESSAGE_CONTENT_TYPE {
+                    if &message.content_type != DEFAULT_MESSAGE_CONTENT_TYPE[index % DEFAULT_MESSAGE_CONTENT_TYPE.len()] {
                         Err(StringError::new("Message content type does not match"))?;
                     }
-                    if message.content_encoding.is_none() {
-                        Err(StringError::new("Message content encoding missing"))?;
+                    match DEFAULT_MESSAGE_CONTENT_ENCODING[index % DEFAULT_MESSAGE_CONTENT_ENCODING.len()] {
+                        None => {
+                            if message.content_encoding.is_some() {
+                                Err(StringError::new("Unexpected message content encoding"))?;
+                            }
+                        },
+                        Some(encoding) => {
+                            if message.content_encoding.is_none() {
+                                Err(StringError::new("Message content encoding missing"))?;
+                            }
+                            if message.content_encoding.unwrap().as_str() != encoding {
+                                Err(StringError::new("Message content encoding does not match"))?;
+                            }
+                        },
                     }
-                    if message.content_encoding.unwrap().as_str() != DEFAULT_MESSAGE_CONTENT_ENCODING {
-                        Err(StringError::new("Message content encoding does not match"))?;
-                    }
-                    if message.content.as_slice() != DEFAULT_MESSAGE.as_bytes() {
+                    if message.content.as_slice() != DEFAULT_MESSAGE[index % DEFAULT_MESSAGE.len()] {
                         Err(StringError::new("Message content does not match"))?;
                     }
                     let deleted = s.delete_message(&message.message_id).await?;
