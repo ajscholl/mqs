@@ -2,8 +2,6 @@ use crate::router::Handler;
 use hyper::{Response, Request, Body};
 use crate::connection::DbConn;
 use crate::routes::messages::{delete_message, receive_messages, MessageCount, publish_messages, MessageContentType};
-use crate::routes::MqsResponse;
-use crate::status::Status;
 
 pub struct ReceiveMessagesHandler {
     pub queue_name: String,
@@ -49,17 +47,9 @@ impl Handler<DbConn> for PublishMessagesHandler {
     }
 
     fn handle(&self, conn: DbConn, req: Request<Body>, body: Vec<u8>) -> Response<Body> {
-        let message_content = match String::from_utf8(body) {
-            Err(err) => {
-                error!("Body contains invalid utf-8 characters: {}", err);
-
-                return MqsResponse::status(Status::BadRequest).into_response();
-            },
-            Ok(s) => s,
-        };
         let content_type = MessageContentType::from_hyper(&req);
 
-        publish_messages(conn, &self.queue_name, message_content, content_type).into_response()
+        publish_messages(conn, &self.queue_name, body.as_slice(), content_type).into_response()
     }
 }
 

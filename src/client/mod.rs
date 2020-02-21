@@ -218,10 +218,10 @@ impl Service {
                 }).to_string();
                 let body = Self::read_body(response.body_mut()).await?;
                 if let Some(boundary) = multipart::is_multipart(&content_type) {
-                    let chunks = multipart::parse(&boundary, std::str::from_utf8(body.as_slice()).unwrap_or(""))?;
+                    let chunks = multipart::parse(boundary.as_bytes(), body.as_slice())?;
                     let mut messages = Vec::with_capacity(chunks.len());
                     for (headers, message) in chunks {
-                        messages.push(Self::parse_message(&headers, || Ok(message.as_bytes().to_vec()))?);
+                        messages.push(Self::parse_message(&headers, || Ok(message.to_vec()))?);
                     }
                     Ok(messages)
                 } else {

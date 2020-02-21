@@ -16,7 +16,7 @@ use crate::models::queue::Queue;
 
 #[derive(Debug)]
 pub struct MessageInput<'a> {
-    pub payload: &'a str,
+    pub payload: &'a [u8],
     pub content_type: &'a str,
 }
 
@@ -24,7 +24,7 @@ pub struct MessageInput<'a> {
 #[table_name="messages"]
 pub struct NewMessage<'a> {
     pub id: Uuid,
-    pub payload: &'a str,
+    pub payload: &'a [u8],
     pub content_type: &'a str,
     pub hash: Option<String>,
     pub queue: &'a str,
@@ -36,7 +36,7 @@ pub struct NewMessage<'a> {
 #[derive(Queryable, Associations, Identifiable, Serialize, Debug)]
 pub struct Message {
     pub id: Uuid,
-    pub payload: String,
+    pub payload: Vec<u8>,
     pub content_type: String,
     pub hash: Option<String>,
     pub queue: String,
@@ -59,7 +59,7 @@ impl <'a> NewMessage<'a> {
         let id = Uuid::new_v4();
         let hash = if queue.content_based_deduplication {
             let mut digest = Sha256::default();
-            Input::input(&mut digest, input.payload.as_bytes());
+            Input::input(&mut digest, input.payload);
             let result = digest.result();
             Some(base64::encode(result.as_slice()))
         } else { None };

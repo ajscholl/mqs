@@ -6,7 +6,6 @@ use crate::connection::DbConn;
 use crate::models::message::{Message, NewMessage, MessageInput};
 use crate::routes::MqsResponse;
 use crate::models::queue::Queue;
-use std::borrow::Borrow;
 use crate::status::Status;
 
 const MAX_MESSAGE_SIZE: u64 = 1024 * 1024;
@@ -28,9 +27,9 @@ impl MessageContentType {
     }
 }
 
-pub fn publish_messages(conn: DbConn, queue_name: &String, message_content: String, content_type: MessageContentType) -> MqsResponse {
+pub fn publish_messages(conn: DbConn, queue_name: &String, message_content: &[u8], content_type: MessageContentType) -> MqsResponse {
     let messages = if let Some(boundary) = multipart::is_multipart(&content_type.content_type) {
-        multipart::parse(&boundary, &message_content)
+        multipart::parse(boundary.as_bytes(), message_content)
     } else {
         Ok(vec![
             ({
@@ -39,7 +38,7 @@ pub fn publish_messages(conn: DbConn, queue_name: &String, message_content: Stri
                      headers.insert(HeaderName::from_static("content-type"), value);
                  }
                  headers
-             }, message_content.borrow()),
+             }, message_content),
         ])
     };
     match messages {

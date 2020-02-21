@@ -85,7 +85,7 @@ impl MqsResponse {
                     if let Ok(id) = HeaderValue::from_str(&message.id.to_string()) {
                         headers.insert(HeaderName::from_static("x-mqs-message-id"), id);
                     }
-                    (headers, message.payload.as_bytes().to_vec())
+                    (headers, message.payload)
                 }).collect();
                 let (boundary, body) = multipart::encode(&message_parts);
 
