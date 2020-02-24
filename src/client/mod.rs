@@ -130,7 +130,7 @@ impl Service {
         let uri = format!("{}/queues/{}", &self.host, queue_name);
         let message = serde_json::to_string(config)?;
         let mut req = Self::new_request(Method::PUT, &uri, Body::from(message))?;
-        req.headers_mut().insert("Content-Type", HeaderValue::from_static("application/json"));
+        req.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         let response = self.client.request(req).await?;
         let mut body = Vec::new();
         Self::parse_response_maybe(response, &mut body, 201, 409).await
@@ -140,7 +140,7 @@ impl Service {
         let uri = format!("{}/queues/{}", &self.host, queue_name);
         let message = serde_json::to_string(config)?;
         let mut req = Self::new_request(Method::POST, &uri, Body::from(message))?;
-        req.headers_mut().insert("Content-Type", HeaderValue::from_static("application/json"));
+        req.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         let response = self.client.request(req).await?;
         let mut body = Vec::new();
         Self::parse_response_maybe(response, &mut body, 200, 404).await
@@ -218,7 +218,7 @@ impl Service {
         let mut response = self.client.request(req).await?;
         match response.status().as_u16() {
             200 => {
-                let content_type = response.headers().get("Content-Type").map_or_else(|| DEFAULT_CONTENT_TYPE, |h| {
+                let content_type = response.headers().get(CONTENT_TYPE).map_or_else(|| DEFAULT_CONTENT_TYPE, |h| {
                     h.to_str().unwrap_or(DEFAULT_CONTENT_TYPE)
                 }).to_string();
                 let body = Self::read_body(response.body_mut()).await?;
@@ -239,11 +239,16 @@ impl Service {
         }
     }
 
-    pub async fn publish_message(&self, queue_name: &str, content_type: &str, message: Vec<u8>) -> Result<bool, ClientError> {
+    pub async fn publish_message(&self, queue_name: &str, content_type: &str, content_encoding: Option<&str>, message: Vec<u8>) -> Result<bool, ClientError> {
         let uri = format!("{}/messages/{}", &self.host, queue_name);
         let mut req = Self::new_request(Method::POST, &uri, Body::from(message))?;
         if let Ok(content_type) = HeaderValue::from_str(content_type) {
-            req.headers_mut().insert("Content-Type", content_type);
+            req.headers_mut().insert(CONTENT_TYPE, content_type);
+        }
+        if let Some(content_encoding) = content_encoding {
+            if let Ok(content_encoding) = HeaderValue::from_str(content_encoding) {
+                req.headers_mut().insert(CONTENT_ENCODING, content_encoding);
+            }
         }
         let response = self.client.request(req).await?;
         match response.status().as_u16() {
@@ -257,7 +262,7 @@ impl Service {
         let uri = format!("{}/messages/{}", &self.host, queue_name);
         let (boundary, body) = multipart::encode(messages);
         let mut req = Self::new_request(Method::POST, &uri, Body::from(body))?;
-        req.headers_mut().insert("Content-Type", HeaderValue::from_str(&format!("multipart/mixed; boundary={}", boundary))?);
+        req.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_str(&format!("multipart/mixed; boundary={}", boundary))?);
         let response = self.client.request(req).await?;
         match response.status().as_u16() {
             200 => Ok(false),

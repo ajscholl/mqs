@@ -209,7 +209,7 @@ pub fn split_by<'a, 'b>(data: &'a [u8], split_by: &'b [u8]) -> Option<(&'a [u8],
 
     while i < end {
         if data[i..].starts_with(split_by) {
-            return Some((&data[0 .. i], &data[i + split_by.len() .. data.len()]));
+            return Some((&data[.. i], &data[i + split_by.len() ..]));
         }
 
         i += 1;
