@@ -17,3 +17,26 @@ impl Status {
         StatusCode::from_u16(*self as u16).unwrap()
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn hyper_identity() {
+        let statuses = [
+            Status::Ok,
+            Status::Created,
+            Status::NoContent,
+            Status::BadRequest,
+            Status::NotFound,
+            Status::Conflict,
+            Status::InternalServerError,
+            Status::ServiceUnavailable,
+        ];
+
+        for status in &statuses {
+            assert_eq!(status.to_hyper().as_u16(), *status as u16);
+        }
+    }
+}

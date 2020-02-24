@@ -302,7 +302,10 @@ mod test {
     fn is_multipart() {
         assert_eq!(None, super::is_multipart("text/plain"));
         assert_eq!(None, super::is_multipart("text/plain; boundary=abc"));
+        assert_eq!(None, super::is_multipart("multipart"));
         assert_eq!(None, super::is_multipart("multipart/alternative; boundary=abc"));
+        assert_eq!(None, super::is_multipart("multipart/mixed"));
+        assert_eq!(None, super::is_multipart("multipart/mixed; foo=bar"));
         assert_eq!(Some("--abc".to_string()), super::is_multipart("multipart/mixed; boundary=abc"));
         assert_eq!(Some("--my boundary".to_string()), super::is_multipart("multipart/mixed; boundary=\"my boundary\""));
         assert_eq!(Some("--my boundary".to_string()), super::is_multipart("multipart/mixed; foo=abc; boundary=\"my boundary\""));
