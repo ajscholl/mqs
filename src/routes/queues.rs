@@ -3,8 +3,7 @@ use hyper::Body;
 use diesel::pg::types::date_and_time::PgInterval;
 use diesel::QueryResult;
 
-use crate::connection::DbConn;
-use crate::models::queue::{NewQueue, QueueInput, Queue};
+use crate::models::queue::{QueueInput, Queue, QueueRepository};
 use crate::routes::MqsResponse;
 use crate::status::Status;
 
@@ -72,7 +71,7 @@ impl QueueConfig {
     }
 }
 
-pub fn new_queue(conn: DbConn, queue_name: &str, params: Result<QueueConfig, serde_json::Error>) -> MqsResponse {
+pub fn new_queue<R: QueueRepository>(repo: R, queue_name: &str, params: Result<QueueConfig, serde_json::Error>) -> MqsResponse {
     match params {
         Err(err) => {
             let err_message = format!("{:?}", err);
@@ -81,7 +80,7 @@ pub fn new_queue(conn: DbConn, queue_name: &str, params: Result<QueueConfig, ser
         },
         Ok(config) => {
             info!("Creating new queue {}", queue_name);
-            let created = NewQueue::insert(&conn, &config.to_input(queue_name));
+            let created = repo.insert(&config.to_input(queue_name));
 
             match created {
                 Ok(Some(queue)) => {
@@ -101,7 +100,7 @@ pub fn new_queue(conn: DbConn, queue_name: &str, params: Result<QueueConfig, ser
     }
 }
 
-pub fn update_queue(conn: DbConn, queue_name: &str, params: Result<QueueConfig, serde_json::Error>) -> MqsResponse {
+pub fn update_queue<R: QueueRepository>(repo: R, queue_name: &str, params: Result<QueueConfig, serde_json::Error>) -> MqsResponse {
     match params {
         Err(err) => {
             let err_message = format!("{:?}", err);
@@ -110,7 +109,7 @@ pub fn update_queue(conn: DbConn, queue_name: &str, params: Result<QueueConfig, 
         },
         Ok(config) => {
             info!("Updating queue {}", queue_name);
-            let result = Queue::update(&conn, &config.to_input(queue_name));
+            let result = repo.update(&config.to_input(queue_name));
 
             match result {
                 Ok(Some(queue)) => {
@@ -130,9 +129,9 @@ pub fn update_queue(conn: DbConn, queue_name: &str, params: Result<QueueConfig, 
     }
 }
 
-pub fn delete_queue(conn: DbConn, queue_name: &str) -> MqsResponse {
+pub fn delete_queue<R: QueueRepository>(repo: R, queue_name: &str) -> MqsResponse {
     info!("Deleting queue {}", queue_name);
-    let deleted = Queue::delete_by_name(&conn, queue_name);
+    let deleted = repo.delete_by_name(queue_name);
     match deleted {
         Ok(Some(queue)) => {
             info!("Deleted queue {}", queue_name);
@@ -197,19 +196,19 @@ pub struct QueuesResponse {
     pub total: i64,
 }
 
-fn list_queues_and_count(conn: DbConn, range: &QueuesRange) -> QueryResult<QueuesResponse> {
-    let queues = Queue::list(&conn, range.offset, range.limit)?;
-    let total = Queue::count(&conn)?;
+fn list_queues_and_count<R: QueueRepository>(repo: R, range: &QueuesRange) -> QueryResult<QueuesResponse> {
+    let queues = repo.list(range.offset, range.limit)?;
+    let total = repo.count()?;
     Ok(QueuesResponse {
         queues: queues.into_iter().map(|queue| QueueConfigOutput::new(queue)).collect(),
         total,
     })
 }
 
-pub fn list_queues(conn: DbConn, range: Result<QueuesRange, String>) -> MqsResponse {
+pub fn list_queues<R: QueueRepository>(repo: R, range: Result<QueuesRange, String>) -> MqsResponse {
     match range {
         Err(err) => MqsResponse::error_owned(err),
-        Ok(range) => match list_queues_and_count(conn, &range) {
+        Ok(range) => match list_queues_and_count(repo, &range) {
             Ok(response) => MqsResponse::json(&response),
             Err(err) => {
                 error!("Failed to read range of queues {:?}-{:?}: {}", range.offset, range.limit, err);
@@ -258,8 +257,8 @@ impl QueueDescription {
     }
 }
 
-pub fn describe_queue(conn: DbConn, queue_name: &str) -> MqsResponse {
-    match Queue::describe(&conn, queue_name) {
+pub fn describe_queue<R: QueueRepository>(repo: R, queue_name: &str) -> MqsResponse {
+    match repo.describe(queue_name) {
         Err(err) => {
             error!("Failed to describe queue {}: {}", queue_name, err);
             MqsResponse::status(Status::InternalServerError)

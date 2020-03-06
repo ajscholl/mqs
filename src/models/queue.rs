@@ -8,6 +8,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::schema::messages;
 use crate::schema::queues;
 use diesel::result::{Error, DatabaseErrorKind};
+use cached::once_cell::sync::Lazy;
+use std::sync::Mutex;
+use cached::Cached;
 
 #[derive(Debug)]
 pub struct QueueInput<'a> {
@@ -71,8 +74,38 @@ fn pg_interval(mut seconds: i64) -> PgInterval {
     }
 }
 
-impl <'a> NewQueue<'a> {
-    pub fn insert(conn: &PgConnection, queue: &QueueInput) -> QueryResult<Option<Queue>> {
+pub struct QueueDescription {
+    pub queue: Queue,
+    pub messages: i64,
+    pub visible_messages: i64,
+    pub oldest_message_age: i64,
+}
+
+pub trait QueueRepository: Sized {
+    fn insert(&self, queue: &QueueInput) -> QueryResult<Option<Queue>>;
+    fn find_by_name(&self, name: &str) -> QueryResult<Option<Queue>>;
+    fn find_by_name_cached(&self, name: &str) -> QueryResult<Option<Queue>> {
+        find_queue_by_name_cached(self, name)
+    }
+    fn count(&self) -> QueryResult<i64>;
+    fn describe(&self, name: &str) -> QueryResult<Option<QueueDescription>>;
+    fn list(&self, offset: Option<i64>, limit: Option<i64>) -> QueryResult<Vec<Queue>>;
+    fn update(&self, queue: &QueueInput) -> QueryResult<Option<Queue>>;
+    fn delete_by_name(&self, name: &str) -> QueryResult<Option<Queue>>;
+}
+
+pub struct PgQueueRepository<'a> {
+    conn: &'a PgConnection,
+}
+
+impl <'a> PgQueueRepository<'a> {
+    pub fn new(conn: &'a PgConnection) -> Self {
+        PgQueueRepository { conn }
+    }
+}
+
+impl <'a> QueueRepository for PgQueueRepository<'a> {
+    fn insert(&self, queue: &QueueInput) -> QueryResult<Option<Queue>> {
         let now = Utc::now();
         let result = diesel::dsl::insert_into(queues::table)
             .values(NewQueue {
@@ -90,53 +123,40 @@ impl <'a> NewQueue<'a> {
                 updated_at: now.naive_utc(),
             })
             .returning(queues::all_columns)
-            .get_result(conn);
+            .get_result(self.conn);
         match result {
             Ok(queue) => Ok(Some(queue)),
             Err(Error::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => Ok(None),
             Err(err) => Err(err),
         }
     }
-}
 
-pub struct QueueDescription {
-    pub queue: Queue,
-    pub messages: i64,
-    pub visible_messages: i64,
-    pub oldest_message_age: i64,
-}
-
-impl Queue {
-    pub fn find_by_name(conn: &PgConnection, name: &str) -> QueryResult<Option<Queue>> {
+    fn find_by_name(&self, name: &str) -> QueryResult<Option<Queue>> {
         queues::table
             .filter(queues::name.eq(name))
-            .first::<Queue>(conn)
+            .first::<Queue>(self.conn)
             .optional()
     }
 
-    pub fn find_by_name_cached(conn: &PgConnection, name: &str) -> QueryResult<Option<Queue>> {
-        find_queue_by_name_cached(conn, name)
-    }
-
-    pub fn count(conn: &PgConnection) -> QueryResult<i64> {
+    fn count(&self) -> QueryResult<i64> {
         queues::table
             .count()
-            .get_result(conn)
+            .get_result(self.conn)
     }
 
-    pub fn describe(conn: &PgConnection, name: &str) -> QueryResult<Option<QueueDescription>> {
-        match Queue::find_by_name(conn, name)? {
+    fn describe(&self, name: &str) -> QueryResult<Option<QueueDescription>> {
+        match self.find_by_name(name)? {
             None => Ok(None),
             Some(queue) => {
                 let messages = messages::table
                     .filter(messages::queue.eq(&queue.name))
                     .count()
-                    .get_result(conn)?;
+                    .get_result(self.conn)?;
                 let now = Utc::now();
                 let visible_messages = messages::table
                     .filter(messages::queue.eq(&queue.name).and(messages::visible_since.le(now.naive_utc())))
                     .count()
-                    .get_result(conn)?;
+                    .get_result(self.conn)?;
                 let oldest_message: Option<NaiveDateTime> = messages::table
                     .select(messages::created_at)
                     .filter(messages::queue.eq(&queue.name))
@@ -144,7 +164,7 @@ impl Queue {
                     .order(messages::created_at.asc())
                     .for_key_share()
                     .skip_locked()
-                    .get_result(conn)
+                    .get_result(self.conn)
                     .optional()?;
 
                 Ok(Some(QueueDescription {
@@ -160,23 +180,23 @@ impl Queue {
         }
     }
 
-    pub fn list(conn: &PgConnection, offset: Option<i64>, limit: Option<i64>) -> QueryResult<Vec<Queue>> {
+    fn list(&self, offset: Option<i64>, limit: Option<i64>) -> QueryResult<Vec<Queue>> {
         let query = queues::table
             .order(queues::id.asc());
 
         match offset {
             None => match limit {
-                None => query.get_results(conn),
-                Some(limit) => query.limit(limit).get_results(conn),
+                None => query.get_results(self.conn),
+                Some(limit) => query.limit(limit).get_results(self.conn),
             },
             Some(offset) => match limit {
-                None => query.offset(offset).get_results(conn),
-                Some(limit) => query.offset(offset).limit(limit).get_results(conn),
+                None => query.offset(offset).get_results(self.conn),
+                Some(limit) => query.offset(offset).limit(limit).get_results(self.conn),
             },
         }
     }
 
-    pub fn update(conn: &PgConnection, queue: &QueueInput) -> QueryResult<Option<Queue>> {
+    fn update(&self, queue: &QueueInput) -> QueryResult<Option<Queue>> {
         diesel::dsl::update(queues::table.filter(queues::name.eq(queue.name)))
             .set((
                 queues::max_receives.eq(queue.max_receives),
@@ -191,14 +211,14 @@ impl Queue {
                 queues::updated_at.eq(Utc::now().naive_utc()),
             ))
             .returning(queues::all_columns)
-            .get_result(conn)
+            .get_result(self.conn)
             .optional()
     }
 
-    pub fn delete_by_name(conn: &PgConnection, name: &str) -> QueryResult<Option<Queue>> {
+    fn delete_by_name(&self, name: &str) -> QueryResult<Option<Queue>> {
         diesel::dsl::delete(queues::table.filter(queues::name.eq(name)))
             .returning(queues::all_columns)
-            .get_result(conn)
+            .get_result(self.conn)
             .optional()
     }
 }
@@ -206,35 +226,66 @@ impl Queue {
 static CACHE_HITS: AtomicUsize = AtomicUsize::new(0);
 static CACHE_MISSES: AtomicUsize = AtomicUsize::new(0);
 
-cached_control!{
-    QUEUE_CACHE: TimedCache<String, Queue> = TimedCache::with_lifespan(10);
+// cached_control!{
+//     QUEUE_CACHE: TimedCache<String, Queue> = TimedCache::with_lifespan(10);
+//
+//     Key = { queue_name.to_string() };
+//
+//     PostGet(cached_val) = {
+//         let cache_hits = CACHE_HITS.fetch_add(1, Ordering::Relaxed) + 1;
+//         info!("Found queue of name {}, total {} cache hits", &cached_val.name, cache_hits);
+//         return Ok(Some(cached_val.clone()))
+//     };
+//
+//     PostExec(body_result) = {
+//         match body_result {
+//             Ok(Some(v)) => v,
+//             Ok(None) => return Ok(None),
+//             Err(e) => return Err(e),
+//         }
+//     };
+//
+//     Set(set_value) = { set_value.clone() };
+//
+//     Return(return_value) = {
+//         Ok(Some(return_value))
+//     };
+//
+//     fn find_queue_by_name_cached(repo: &R, queue_name: &str) -> QueryResult<Option<Queue>> = {
+//         let cache_misses = CACHE_MISSES.fetch_add(1, Ordering::Relaxed) + 1;
+//         info!("Getting queue of name {}, total {} cache misses", queue_name, cache_misses);
+//         repo.find_by_name(queue_name)
+//     }
+// }
 
-    Key = { queue_name.to_string() };
+static QUEUE_CACHE: Lazy<Mutex<TimedCache<String, Queue>>> = Lazy::new(|| Mutex::new(TimedCache::with_lifespan(10)));
 
-    PostGet(cached_val) = {
-        let cache_hits = CACHE_HITS.fetch_add(1, Ordering::Relaxed) + 1;
-        info!("Found queue of name {}, total {} cache hits", &cached_val.name, cache_hits);
-        return Ok(Some(cached_val.clone()))
-    };
-
-    PostExec(body_result) = {
-        match body_result {
-            Ok(Some(v)) => v,
-            Ok(None) => return Ok(None),
-            Err(e) => return Err(e),
+fn find_queue_by_name_cached<R: QueueRepository>(repo: &R, queue_name: &str) -> QueryResult<Option<Queue>> {
+    let key = queue_name.to_string();
+    if let Ok(mut cache) = QUEUE_CACHE.lock() {
+        let res = Cached::cache_get(&mut *cache, &key);
+        if let Some(cached_val) = res {
+            let cache_hits = CACHE_HITS.fetch_add(1, Ordering::Relaxed) + 1;
+            info!("Found queue of name {}, total {} cache hits", &cached_val.name, cache_hits);
+            return Ok(Some(cached_val.clone()));
         }
-    };
-
-    Set(set_value) = { set_value.clone() };
-
-    Return(return_value) = {
-        Ok(Some(return_value))
-    };
-
-    fn find_queue_by_name_cached(conn: &PgConnection, queue_name: &str) -> QueryResult<Option<Queue>> = {
-        let cache_misses = CACHE_MISSES.fetch_add(1, Ordering::Relaxed) + 1;
-        info!("Getting queue of name {}, total {} cache misses", queue_name, cache_misses);
-        Queue::find_by_name(conn, queue_name)
+    } else {
+        error!("Failed to get queue cache lock");
+        return repo.find_by_name(queue_name);
+    }
+    let cache_misses = CACHE_MISSES.fetch_add(1, Ordering::Relaxed) + 1;
+    info!("Getting queue of name {}, total {} cache misses", queue_name, cache_misses);
+    match repo.find_by_name(queue_name) {
+        Err(e) => Err(e),
+        Ok(None) => Ok(None),
+        Ok(Some(queue)) => {
+            if let Ok(mut cache) = QUEUE_CACHE.lock() {
+                Cached::cache_set(&mut *cache, key, queue.clone());
+            } else {
+                error!("Failed to get queue cache lock");
+            }
+            Ok(Some(queue))
+        }
     }
 }
 

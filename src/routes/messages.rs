@@ -5,7 +5,7 @@ use crate::multipart;
 use crate::connection::DbConn;
 use crate::models::message::{Message, NewMessage, MessageInput};
 use crate::routes::MqsResponse;
-use crate::models::queue::Queue;
+use crate::models::queue::QueueRepository;
 use crate::status::Status;
 
 const MAX_MESSAGE_SIZE: u64 = 1024 * 1024;
@@ -17,7 +17,7 @@ fn boundary_from_headers(headers: &HeaderMap<HeaderValue>) -> Option<String> {
     multipart::is_multipart(content_type)
 }
 
-pub fn publish_messages(conn: DbConn, queue_name: &String, message_content: &[u8], headers: HeaderMap<HeaderValue>) -> MqsResponse {
+pub fn publish_messages<QR: QueueRepository>(queue_repo: QR, conn: &DbConn, queue_name: &String, message_content: &[u8], headers: HeaderMap<HeaderValue>) -> MqsResponse {
     let messages = if let Some(boundary) = boundary_from_headers(&headers) {
         multipart::parse(boundary.as_bytes(), message_content)
     } else {
@@ -28,7 +28,7 @@ pub fn publish_messages(conn: DbConn, queue_name: &String, message_content: &[u8
             error!("Failed to understand request body: {}", err);
             MqsResponse::status(Status::BadRequest)
         },
-        Ok(messages) => match Queue::find_by_name_cached(&conn, &queue_name) {
+        Ok(messages) => match queue_repo.find_by_name_cached(&queue_name) {
             Err(err) => {
                 error!("Failed to find queue {} for new message: {}", &queue_name, err);
                 MqsResponse::status(Status::InternalServerError)
@@ -42,7 +42,7 @@ pub fn publish_messages(conn: DbConn, queue_name: &String, message_content: &[u8
 
                 for (message_headers, message_payload) in messages {
                     info!("Inserting new message into queue {}", &queue_name);
-                    match NewMessage::insert(&conn, &queue, &MessageInput {
+                    match NewMessage::insert(conn, &queue, &MessageInput {
                         content_type: message_headers.get(CONTENT_TYPE)
                             .map_or_else(|| DEFAULT_CONTENT_TYPE, |v| v.to_str().unwrap_or(DEFAULT_CONTENT_TYPE)),
                         content_encoding: message_headers.get(CONTENT_ENCODING)
@@ -75,10 +75,10 @@ pub fn publish_messages(conn: DbConn, queue_name: &String, message_content: &[u8
 
 pub struct MessageCount(pub i64);
 
-pub fn receive_messages(conn: DbConn, queue_name: &str, message_count: Result<MessageCount, ()>) -> MqsResponse {
+pub fn receive_messages<QR: QueueRepository>(queue_repo: QR, conn: &DbConn, queue_name: &str, message_count: Result<MessageCount, ()>) -> MqsResponse {
     match message_count {
         Err(_) => MqsResponse::error_static("Failed to parse message count"),
-        Ok(count) => match Queue::find_by_name_cached(&conn, queue_name) {
+        Ok(count) => match queue_repo.find_by_name_cached(queue_name) {
             Err(err) => {
                 error!("Failed to find queue {} for message receive: {}", queue_name, err);
                 MqsResponse::status(Status::InternalServerError)
@@ -89,7 +89,7 @@ pub fn receive_messages(conn: DbConn, queue_name: &str, message_count: Result<Me
             },
             Ok(Some(queue)) => {
                 debug!("Reading 1 message from queue {}", queue_name);
-                match Message::get_from_queue(&conn, &queue, count.0) {
+                match Message::get_from_queue(conn, &queue, count.0) {
                     Ok(messages) => match messages.len() {
                         0 => MqsResponse::status(Status::NoContent),
                         _ => MqsResponse::messages(messages),

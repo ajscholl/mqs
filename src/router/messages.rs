@@ -2,6 +2,7 @@ use crate::router::Handler;
 use hyper::{Response, Request, Body};
 use crate::connection::DbConn;
 use crate::routes::messages::{delete_message, receive_messages, MessageCount, publish_messages};
+use crate::models::queue::PgQueueRepository;
 
 pub struct ReceiveMessagesHandler {
     pub queue_name: String,
@@ -37,7 +38,7 @@ impl Handler<DbConn> for ReceiveMessagesHandler {
                 Ok(MessageCount(1))
             }
         };
-        receive_messages(conn, &self.queue_name, message_count).into_response()
+        receive_messages(PgQueueRepository::new(&conn), &conn, &self.queue_name, message_count).into_response()
     }
 }
 
@@ -48,7 +49,7 @@ impl Handler<DbConn> for PublishMessagesHandler {
 
     fn handle(&self, conn: DbConn, req: Request<Body>, body: Vec<u8>) -> Response<Body> {
         let (parts, _) = req.into_parts();
-        publish_messages(conn, &self.queue_name, body.as_slice(), parts.headers).into_response()
+        publish_messages(PgQueueRepository::new(&conn), &conn, &self.queue_name, body.as_slice(), parts.headers).into_response()
     }
 }
 

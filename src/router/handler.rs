@@ -38,7 +38,7 @@ pub fn make_router() -> Router<DbConn> {
         .with_route("messages", Router::new().with_wildcard(MessagesSubRouter))
 }
 
-pub async fn handle(conn: Option<DbConn>, router: &Router<DbConn>, mut req: Request<Body>) -> Result<Response<Body>, Infallible> {
+pub async fn handle<T>(conn: Option<T>, router: &Router<T>, mut req: Request<Body>) -> Result<Response<Body>, Infallible> {
     let mut response = if let Some(conn) = conn {
         let segments = req.uri().path().split("/").into_iter();
         {
@@ -84,4 +84,16 @@ pub async fn handle(conn: Option<DbConn>, router: &Router<DbConn>, mut req: Requ
     // TODO: should we add this header every time or only when seeing it from the client / on HTTP/1.1?
     response.headers_mut().insert(CONNECTION, HeaderValue::from_static("keep-alive"));
     Ok(response)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn health_router() {
+        let router = make_router();
+        let handler = router.route(&Method::GET, vec!["health"].into_iter());
+        assert!(handler.is_some());
+    }
 }

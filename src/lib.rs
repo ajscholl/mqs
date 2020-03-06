@@ -7,7 +7,7 @@ extern crate regex;
 extern crate time;
 extern crate uuid;
 
-#[macro_use] extern crate cached;
+#[cfg_attr(test, macro_use)] extern crate cached;
 #[macro_use] extern crate diesel;
 #[macro_use] extern crate log;
 #[macro_use] extern crate serde_derive;
