@@ -81,12 +81,15 @@ pub struct QueueDescription {
     pub oldest_message_age: i64,
 }
 
-pub trait QueueRepository: Sized {
-    fn insert(&self, queue: &QueueInput) -> QueryResult<Option<Queue>>;
+pub trait QueueSource: Sized {
     fn find_by_name(&self, name: &str) -> QueryResult<Option<Queue>>;
     fn find_by_name_cached(&self, name: &str) -> QueryResult<Option<Queue>> {
         find_queue_by_name_cached(self, name)
     }
+}
+
+pub trait QueueRepository: QueueSource {
+    fn insert(&self, queue: &QueueInput) -> QueryResult<Option<Queue>>;
     fn count(&self) -> QueryResult<i64>;
     fn describe(&self, name: &str) -> QueryResult<Option<QueueDescription>>;
     fn list(&self, offset: Option<i64>, limit: Option<i64>) -> QueryResult<Vec<Queue>>;
@@ -101,6 +104,15 @@ pub struct PgQueueRepository<'a> {
 impl <'a> PgQueueRepository<'a> {
     pub fn new(conn: &'a PgConnection) -> Self {
         PgQueueRepository { conn }
+    }
+}
+
+impl <'a> QueueSource for PgQueueRepository<'a> {
+    fn find_by_name(&self, name: &str) -> QueryResult<Option<Queue>> {
+        queues::table
+            .filter(queues::name.eq(name))
+            .first::<Queue>(self.conn)
+            .optional()
     }
 }
 
@@ -129,13 +141,6 @@ impl <'a> QueueRepository for PgQueueRepository<'a> {
             Err(Error::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => Ok(None),
             Err(err) => Err(err),
         }
-    }
-
-    fn find_by_name(&self, name: &str) -> QueryResult<Option<Queue>> {
-        queues::table
-            .filter(queues::name.eq(name))
-            .first::<Queue>(self.conn)
-            .optional()
     }
 
     fn count(&self) -> QueryResult<i64> {
@@ -225,42 +230,9 @@ impl <'a> QueueRepository for PgQueueRepository<'a> {
 
 static CACHE_HITS: AtomicUsize = AtomicUsize::new(0);
 static CACHE_MISSES: AtomicUsize = AtomicUsize::new(0);
-
-// cached_control!{
-//     QUEUE_CACHE: TimedCache<String, Queue> = TimedCache::with_lifespan(10);
-//
-//     Key = { queue_name.to_string() };
-//
-//     PostGet(cached_val) = {
-//         let cache_hits = CACHE_HITS.fetch_add(1, Ordering::Relaxed) + 1;
-//         info!("Found queue of name {}, total {} cache hits", &cached_val.name, cache_hits);
-//         return Ok(Some(cached_val.clone()))
-//     };
-//
-//     PostExec(body_result) = {
-//         match body_result {
-//             Ok(Some(v)) => v,
-//             Ok(None) => return Ok(None),
-//             Err(e) => return Err(e),
-//         }
-//     };
-//
-//     Set(set_value) = { set_value.clone() };
-//
-//     Return(return_value) = {
-//         Ok(Some(return_value))
-//     };
-//
-//     fn find_queue_by_name_cached(repo: &R, queue_name: &str) -> QueryResult<Option<Queue>> = {
-//         let cache_misses = CACHE_MISSES.fetch_add(1, Ordering::Relaxed) + 1;
-//         info!("Getting queue of name {}, total {} cache misses", queue_name, cache_misses);
-//         repo.find_by_name(queue_name)
-//     }
-// }
-
 static QUEUE_CACHE: Lazy<Mutex<TimedCache<String, Queue>>> = Lazy::new(|| Mutex::new(TimedCache::with_lifespan(10)));
 
-fn find_queue_by_name_cached<R: QueueRepository>(repo: &R, queue_name: &str) -> QueryResult<Option<Queue>> {
+fn find_queue_by_name_cached<R: QueueSource>(repo: &R, queue_name: &str) -> QueryResult<Option<Queue>> {
     let key = queue_name.to_string();
     if let Ok(mut cache) = QUEUE_CACHE.lock() {
         let res = Cached::cache_get(&mut *cache, &key);
@@ -293,49 +265,25 @@ fn find_queue_by_name_cached<R: QueueRepository>(repo: &R, queue_name: &str) -> 
 mod test {
     use super::*;
 
-    static TEST_CACHE_HITS: AtomicUsize = AtomicUsize::new(0);
-    static TEST_CACHE_MISSES: AtomicUsize = AtomicUsize::new(0);
-
     #[test]
     fn cache_test() {
-        let queue = find_generated_queue("my queue").unwrap().unwrap();
-        assert_eq!(TEST_CACHE_HITS.load(Ordering::Relaxed), 0);
-        assert_eq!(TEST_CACHE_MISSES.load(Ordering::Relaxed), 1);
-        let cached = find_generated_queue("my queue").unwrap().unwrap();
+        let repo = QueueSourceImpl {};
+        let queue = repo.find_by_name_cached("my queue").unwrap().unwrap();
+        assert_eq!(CACHE_HITS.load(Ordering::Relaxed), 0);
+        assert_eq!(CACHE_MISSES.load(Ordering::Relaxed), 1);
+        let cached = repo.find_by_name_cached("my queue").unwrap().unwrap();
         assert_eq!(queue, cached);
-        assert_eq!(TEST_CACHE_HITS.load(Ordering::Relaxed), 1);
-        assert_eq!(TEST_CACHE_MISSES.load(Ordering::Relaxed), 1);
+        assert_eq!(CACHE_HITS.load(Ordering::Relaxed), 1);
+        assert_eq!(CACHE_MISSES.load(Ordering::Relaxed), 1);
     }
 
-    cached_control!{
-        TEST_CACHE: TimedCache<String, Queue> = TimedCache::with_lifespan(10);
+    struct QueueSourceImpl {}
 
-        Key = { queue_name.to_string() };
-
-        PostGet(cached_val) = {
-            TEST_CACHE_HITS.fetch_add(1, Ordering::Relaxed);
-            return Ok(Some(cached_val.clone()))
-        };
-
-        PostExec(body_result) = {
-            match body_result {
-                Ok(Some(v)) => v,
-                Ok(None) => return Ok(None),
-                Err(e) => return Err(e),
-            }
-        };
-
-        Set(set_value) = { set_value.clone() };
-
-        Return(return_value) = {
-            Ok(Some(return_value))
-        };
-
-        fn find_generated_queue(queue_name: &str) -> QueryResult<Option<Queue>> = {
-            TEST_CACHE_MISSES.fetch_add(1, Ordering::Relaxed);
+    impl QueueSource for QueueSourceImpl {
+        fn find_by_name(&self, name: &str) -> QueryResult<Option<Queue>> {
             Ok(Some(Queue {
                 id: 1,
-                name: queue_name.to_string(),
+                name: name.to_string(),
                 max_receives: None,
                 dead_letter_queue: None,
                 retention_timeout: pg_interval(30),

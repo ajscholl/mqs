@@ -18,6 +18,9 @@ use mqs::router::Router;
 use mqs::router::handler::{handle, make_router};
 use mqs::connection::{init_pool, Pool, DbConn};
 use tokio::runtime::Builder;
+use std::io::Stdout;
+use cached::once_cell::sync::Lazy;
+use std::ops::Deref;
 
 struct HandlerService {
     pool: Pool,
@@ -31,13 +34,12 @@ impl HandlerService {
     }
 }
 
-static LOGGER: Logger = Logger { level: Level::Info };
-
 fn main() {
     dotenv().ok();
 
-    log::set_logger(&LOGGER)
-        .map(|()| log::set_max_level(LOGGER.level.to_level_filter())).unwrap();
+    static LOGGER: Lazy<Logger<Stdout>> = Lazy::new(|| Logger::new(Level::Info, std::io::stdout()));
+    log::set_logger(LOGGER.deref())
+        .map(|()| log::set_max_level(LOGGER.level().to_level_filter())).unwrap();
 
     let (pool, pool_size) = init_pool();
     let mut rt = Builder::new()

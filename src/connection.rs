@@ -40,3 +40,22 @@ impl Deref for DbConn {
         &self.0
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn database_url() {
+        env::set_var("DATABASE_URL", "url://database");
+        assert_eq!("url://database", &super::database_url());
+    }
+
+    #[test]
+    fn pool_size() {
+        env::set_var("MAX_POOL_SIZE", "50");
+        assert_eq!((50, 50), super::pool_size());
+        env::set_var("MIN_POOL_SIZE", "20");
+        assert_eq!((20, 50), super::pool_size());
+    }
+}
