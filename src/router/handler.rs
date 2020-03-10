@@ -1,17 +1,20 @@
 use hyper::{Request, Body, Response, Method, StatusCode};
-use std::convert::Infallible;
-use crate::router::{Router, WildcardRouter};
 use hyper::header::{HeaderValue, SERVER, CONNECTION, CONTENT_TYPE};
+use std::convert::Infallible;
+
+use crate::router::{Router, WildcardRouter};
 use crate::router::queues::{DescribeQueueHandler, CreateQueueHandler, UpdateQueueHandler, DeleteQueueHandler, ListQueuesHandler};
 use crate::router::messages::{ReceiveMessagesHandler, PublishMessagesHandler, DeleteMessageHandler};
 use crate::router::health::HealthHandler;
-use crate::connection::DbConn;
 use crate::client::Service;
+use crate::models::queue::QueueRepository;
+use crate::models::message::MessageRepository;
+use crate::models::health::HealthCheckRepository;
 
 struct QueuesSubRouter;
 
-impl WildcardRouter<DbConn> for QueuesSubRouter {
-    fn with_segment(&self, segment: &str) -> Router<DbConn> {
+impl <R: QueueRepository> WildcardRouter<R> for QueuesSubRouter {
+    fn with_segment(&self, segment: &str) -> Router<R> {
         Router::new()
             .with_handler(Method::GET, DescribeQueueHandler { queue_name: segment.to_string() })
             .with_handler(Method::PUT, CreateQueueHandler { queue_name: segment.to_string() })
@@ -22,8 +25,8 @@ impl WildcardRouter<DbConn> for QueuesSubRouter {
 
 struct MessagesSubRouter;
 
-impl WildcardRouter<DbConn> for MessagesSubRouter {
-    fn with_segment(&self, segment: &str) -> Router<DbConn> {
+impl <R: QueueRepository + MessageRepository> WildcardRouter<R> for MessagesSubRouter {
+    fn with_segment(&self, segment: &str) -> Router<R> {
         Router::new()
             .with_handler(Method::GET, ReceiveMessagesHandler { queue_name: segment.to_string() })
             .with_handler(Method::POST, PublishMessagesHandler { queue_name: segment.to_string() })
@@ -31,7 +34,7 @@ impl WildcardRouter<DbConn> for MessagesSubRouter {
     }
 }
 
-pub fn make_router() -> Router<DbConn> {
+pub fn make_router<R: QueueRepository + MessageRepository + HealthCheckRepository>() -> Router<R> {
     Router::new()
         .with_route_simple("health", Method::GET, HealthHandler)
         .with_route("queues", Router::new_simple(Method::GET, ListQueuesHandler).with_wildcard(QueuesSubRouter))
@@ -89,10 +92,79 @@ pub async fn handle<T>(conn: Option<T>, router: &Router<T>, mut req: Request<Bod
 #[cfg(test)]
 mod test {
     use super::*;
+    use diesel::QueryResult;
+    use crate::models::queue::{QueueInput, QueueDescription, Queue, QueueSource};
+    use uuid::Uuid;
+    use crate::models::message::{Message, MessageInput};
+    use diesel::result::Error;
+
+    struct TestRepo {
+        health: bool,
+    }
+
+    impl HealthCheckRepository for TestRepo {
+        fn check_health(&self) -> bool {
+            self.health
+        }
+    }
+
+    impl MessageRepository for TestRepo {
+        fn insert_message(&self, queue: &Queue, input: &MessageInput) -> QueryResult<bool> {
+            unimplemented!()
+        }
+
+        fn get_message_from_queue(&self, queue: &Queue, count: i64) -> QueryResult<Vec<Message>> {
+            unimplemented!()
+        }
+
+        fn move_message_to_queue(&self, ids: Vec<Uuid>, new_queue: &str) -> QueryResult<usize> {
+            unimplemented!()
+        }
+
+        fn delete_message_by_id(&self, id: Uuid) -> QueryResult<bool> {
+            unimplemented!()
+        }
+
+        fn delete_messages_by_ids(&self, ids: Vec<Uuid>) -> QueryResult<usize> {
+            unimplemented!()
+        }
+    }
+
+    impl QueueSource for TestRepo {
+        fn find_by_name(&self, name: &str) -> QueryResult<Option<Queue>> {
+            unimplemented!()
+        }
+    }
+
+    impl QueueRepository for TestRepo {
+        fn insert_queue(&self, queue: &QueueInput) -> QueryResult<Option<Queue>> {
+            unimplemented!()
+        }
+
+        fn count_queues(&self) -> QueryResult<i64> {
+            unimplemented!()
+        }
+
+        fn describe_queue(&self, name: &str) -> QueryResult<Option<QueueDescription>> {
+            unimplemented!()
+        }
+
+        fn list_queues(&self, offset: Option<i64>, limit: Option<i64>) -> QueryResult<Vec<Queue>> {
+            unimplemented!()
+        }
+
+        fn update_queue(&self, queue: &QueueInput) -> QueryResult<Option<Queue>> {
+            unimplemented!()
+        }
+
+        fn delete_queue_by_name(&self, name: &str) -> QueryResult<Option<Queue>> {
+            unimplemented!()
+        }
+    }
 
     #[test]
     fn health_router() {
-        let router = make_router();
+        let router = make_router::<TestRepo>();
         let handler = router.route(&Method::GET, vec!["health"].into_iter());
         assert!(handler.is_some());
     }

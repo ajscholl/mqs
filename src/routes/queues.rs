@@ -80,7 +80,7 @@ pub fn new_queue<R: QueueRepository>(repo: R, queue_name: &str, params: Result<Q
         },
         Ok(config) => {
             info!("Creating new queue {}", queue_name);
-            let created = repo.insert(&config.to_input(queue_name));
+            let created = repo.insert_queue(&config.to_input(queue_name));
 
             match created {
                 Ok(Some(queue)) => {
@@ -109,7 +109,7 @@ pub fn update_queue<R: QueueRepository>(repo: R, queue_name: &str, params: Resul
         },
         Ok(config) => {
             info!("Updating queue {}", queue_name);
-            let result = repo.update(&config.to_input(queue_name));
+            let result = repo.update_queue(&config.to_input(queue_name));
 
             match result {
                 Ok(Some(queue)) => {
@@ -131,7 +131,7 @@ pub fn update_queue<R: QueueRepository>(repo: R, queue_name: &str, params: Resul
 
 pub fn delete_queue<R: QueueRepository>(repo: R, queue_name: &str) -> MqsResponse {
     info!("Deleting queue {}", queue_name);
-    let deleted = repo.delete_by_name(queue_name);
+    let deleted = repo.delete_queue_by_name(queue_name);
     match deleted {
         Ok(Some(queue)) => {
             info!("Deleted queue {}", queue_name);
@@ -197,8 +197,8 @@ pub struct QueuesResponse {
 }
 
 fn list_queues_and_count<R: QueueRepository>(repo: R, range: &QueuesRange) -> QueryResult<QueuesResponse> {
-    let queues = repo.list(range.offset, range.limit)?;
-    let total = repo.count()?;
+    let queues = repo.list_queues(range.offset, range.limit)?;
+    let total = repo.count_queues()?;
     Ok(QueuesResponse {
         queues: queues.into_iter().map(|queue| QueueConfigOutput::new(queue)).collect(),
         total,
@@ -258,7 +258,7 @@ impl QueueDescription {
 }
 
 pub fn describe_queue<R: QueueRepository>(repo: R, queue_name: &str) -> MqsResponse {
-    match repo.describe(queue_name) {
+    match repo.describe_queue(queue_name) {
         Err(err) => {
             error!("Failed to describe queue {}: {}", queue_name, err);
             MqsResponse::status(Status::InternalServerError)

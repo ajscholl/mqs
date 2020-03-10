@@ -1,16 +1,17 @@
 use chrono::{NaiveDateTime, Utc};
 use diesel::prelude::*;
-use diesel::pg::PgConnection;
 use diesel::pg::data_types::PgInterval;
+use diesel::result::{Error, DatabaseErrorKind};
 use cached::stores::TimedCache;
+use cached::Cached;
+use cached::once_cell::sync::Lazy;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::schema::messages;
 use crate::schema::queues;
-use diesel::result::{Error, DatabaseErrorKind};
-use cached::once_cell::sync::Lazy;
-use std::sync::Mutex;
-use cached::Cached;
+use crate::models::PgRepository;
+use std::ops::Deref;
 
 #[derive(Debug)]
 pub struct QueueInput<'a> {
@@ -89,35 +90,25 @@ pub trait QueueSource: Sized {
 }
 
 pub trait QueueRepository: QueueSource {
-    fn insert(&self, queue: &QueueInput) -> QueryResult<Option<Queue>>;
-    fn count(&self) -> QueryResult<i64>;
-    fn describe(&self, name: &str) -> QueryResult<Option<QueueDescription>>;
-    fn list(&self, offset: Option<i64>, limit: Option<i64>) -> QueryResult<Vec<Queue>>;
-    fn update(&self, queue: &QueueInput) -> QueryResult<Option<Queue>>;
-    fn delete_by_name(&self, name: &str) -> QueryResult<Option<Queue>>;
+    fn insert_queue(&self, queue: &QueueInput) -> QueryResult<Option<Queue>>;
+    fn count_queues(&self) -> QueryResult<i64>;
+    fn describe_queue(&self, name: &str) -> QueryResult<Option<QueueDescription>>;
+    fn list_queues(&self, offset: Option<i64>, limit: Option<i64>) -> QueryResult<Vec<Queue>>;
+    fn update_queue(&self, queue: &QueueInput) -> QueryResult<Option<Queue>>;
+    fn delete_queue_by_name(&self, name: &str) -> QueryResult<Option<Queue>>;
 }
 
-pub struct PgQueueRepository<'a> {
-    conn: &'a PgConnection,
-}
-
-impl <'a> PgQueueRepository<'a> {
-    pub fn new(conn: &'a PgConnection) -> Self {
-        PgQueueRepository { conn }
-    }
-}
-
-impl <'a> QueueSource for PgQueueRepository<'a> {
+impl QueueSource for PgRepository {
     fn find_by_name(&self, name: &str) -> QueryResult<Option<Queue>> {
         queues::table
             .filter(queues::name.eq(name))
-            .first::<Queue>(self.conn)
+            .first::<Queue>(self.conn.deref())
             .optional()
     }
 }
 
-impl <'a> QueueRepository for PgQueueRepository<'a> {
-    fn insert(&self, queue: &QueueInput) -> QueryResult<Option<Queue>> {
+impl QueueRepository for PgRepository {
+    fn insert_queue(&self, queue: &QueueInput) -> QueryResult<Option<Queue>> {
         let now = Utc::now();
         let result = diesel::dsl::insert_into(queues::table)
             .values(NewQueue {
@@ -135,7 +126,7 @@ impl <'a> QueueRepository for PgQueueRepository<'a> {
                 updated_at: now.naive_utc(),
             })
             .returning(queues::all_columns)
-            .get_result(self.conn);
+            .get_result(self.conn.deref());
         match result {
             Ok(queue) => Ok(Some(queue)),
             Err(Error::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => Ok(None),
@@ -143,25 +134,25 @@ impl <'a> QueueRepository for PgQueueRepository<'a> {
         }
     }
 
-    fn count(&self) -> QueryResult<i64> {
+    fn count_queues(&self) -> QueryResult<i64> {
         queues::table
             .count()
-            .get_result(self.conn)
+            .get_result(self.conn.deref())
     }
 
-    fn describe(&self, name: &str) -> QueryResult<Option<QueueDescription>> {
+    fn describe_queue(&self, name: &str) -> QueryResult<Option<QueueDescription>> {
         match self.find_by_name(name)? {
             None => Ok(None),
             Some(queue) => {
                 let messages = messages::table
                     .filter(messages::queue.eq(&queue.name))
                     .count()
-                    .get_result(self.conn)?;
+                    .get_result(self.conn.deref())?;
                 let now = Utc::now();
                 let visible_messages = messages::table
                     .filter(messages::queue.eq(&queue.name).and(messages::visible_since.le(now.naive_utc())))
                     .count()
-                    .get_result(self.conn)?;
+                    .get_result(self.conn.deref())?;
                 let oldest_message: Option<NaiveDateTime> = messages::table
                     .select(messages::created_at)
                     .filter(messages::queue.eq(&queue.name))
@@ -169,7 +160,7 @@ impl <'a> QueueRepository for PgQueueRepository<'a> {
                     .order(messages::created_at.asc())
                     .for_key_share()
                     .skip_locked()
-                    .get_result(self.conn)
+                    .get_result(self.conn.deref())
                     .optional()?;
 
                 Ok(Some(QueueDescription {
@@ -185,23 +176,23 @@ impl <'a> QueueRepository for PgQueueRepository<'a> {
         }
     }
 
-    fn list(&self, offset: Option<i64>, limit: Option<i64>) -> QueryResult<Vec<Queue>> {
+    fn list_queues(&self, offset: Option<i64>, limit: Option<i64>) -> QueryResult<Vec<Queue>> {
         let query = queues::table
             .order(queues::id.asc());
 
         match offset {
             None => match limit {
-                None => query.get_results(self.conn),
-                Some(limit) => query.limit(limit).get_results(self.conn),
+                None => query.get_results(self.conn.deref()),
+                Some(limit) => query.limit(limit).get_results(self.conn.deref()),
             },
             Some(offset) => match limit {
-                None => query.offset(offset).get_results(self.conn),
-                Some(limit) => query.offset(offset).limit(limit).get_results(self.conn),
+                None => query.offset(offset).get_results(self.conn.deref()),
+                Some(limit) => query.offset(offset).limit(limit).get_results(self.conn.deref()),
             },
         }
     }
 
-    fn update(&self, queue: &QueueInput) -> QueryResult<Option<Queue>> {
+    fn update_queue(&self, queue: &QueueInput) -> QueryResult<Option<Queue>> {
         diesel::dsl::update(queues::table.filter(queues::name.eq(queue.name)))
             .set((
                 queues::max_receives.eq(queue.max_receives),
@@ -216,14 +207,14 @@ impl <'a> QueueRepository for PgQueueRepository<'a> {
                 queues::updated_at.eq(Utc::now().naive_utc()),
             ))
             .returning(queues::all_columns)
-            .get_result(self.conn)
+            .get_result(self.conn.deref())
             .optional()
     }
 
-    fn delete_by_name(&self, name: &str) -> QueryResult<Option<Queue>> {
+    fn delete_queue_by_name(&self, name: &str) -> QueryResult<Option<Queue>> {
         diesel::dsl::delete(queues::table.filter(queues::name.eq(name)))
             .returning(queues::all_columns)
-            .get_result(self.conn)
+            .get_result(self.conn.deref())
             .optional()
     }
 }

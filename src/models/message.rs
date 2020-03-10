@@ -1,6 +1,6 @@
 use chrono::{NaiveDateTime, Utc, DateTime};
 use diesel::prelude::*;
-use diesel::pg::{PgConnection, Pg};
+use diesel::pg::Pg;
 use diesel::pg::types::date_and_time::PgInterval;
 use diesel::result::{Error, DatabaseErrorKind};
 use diesel::query_builder::{QueryFragment, AstPass};
@@ -9,10 +9,11 @@ use time::Duration;
 use uuid::Uuid;
 use sha2::{Sha256, Digest};
 use sha2::digest::Input;
-use std::ops::Add;
+use std::ops::{Add, Deref};
 
 use crate::schema::messages;
 use crate::models::queue::Queue;
+use crate::models::PgRepository;
 
 #[derive(Debug)]
 pub struct MessageInput<'a> {
@@ -55,8 +56,16 @@ fn add_pg_interval(time: &DateTime<Utc>, offset: &PgInterval) -> DateTime<Utc> {
     time.add(us + d + m)
 }
 
-impl <'a> NewMessage<'a> {
-    pub fn insert(conn: &PgConnection, queue: &Queue, input: &MessageInput) -> QueryResult<bool> {
+pub trait MessageRepository {
+    fn insert_message(&self, queue: &Queue, input: &MessageInput) -> QueryResult<bool>;
+    fn get_message_from_queue(&self, queue: &Queue, count: i64)-> QueryResult<Vec<Message>>;
+    fn move_message_to_queue(&self, ids: Vec<Uuid>, new_queue: &str) -> QueryResult<usize>;
+    fn delete_message_by_id(&self, id: Uuid) -> QueryResult<bool>;
+    fn delete_messages_by_ids(&self, ids: Vec<Uuid>) -> QueryResult<usize>;
+}
+
+impl MessageRepository for PgRepository {
+    fn insert_message(&self, queue: &Queue, input: &MessageInput) -> QueryResult<bool> {
         let now = Utc::now();
         let visible_since = add_pg_interval(&now, &queue.message_delay);
         let id = Uuid::new_v4();
@@ -78,12 +87,85 @@ impl <'a> NewMessage<'a> {
                 visible_since: visible_since.naive_utc(),
                 created_at: now.naive_utc(),
             })
-            .execute(conn);
+            .execute(self.conn.deref());
         match result {
             Ok(_) => Ok(true),
             Err(Error::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => Ok(false),
             Err(err) => Err(err),
         }
+    }
+
+
+    fn get_message_from_queue(&self, queue: &Queue, count: i64)-> QueryResult<Vec<Message>> {
+        let now = Utc::now();
+        let visible_since = add_pg_interval(&now, &queue.visibility_timeout);
+
+        let update_query = diesel::dsl::update(messages::table)
+            .set((
+                     messages::visible_since.eq(visible_since.naive_utc()),
+                     messages::receives.eq(messages::receives + 1),
+            ))
+            .filter(In::new(
+                messages::id,
+                MessageIdsForFetch::new(&queue.name, now.naive_utc(), count),
+            ))
+            .returning(messages::all_columns);
+
+        let messages: Vec<Message> = update_query.get_results(self.conn.deref())?;
+
+        // filter result, move messages to dead letter queues
+        let mut result = Vec::with_capacity(messages.len());
+        let mut move_to_dead_letter_queue = Vec::new();
+        let mut to_delete = Vec::new();
+        for message in messages {
+            let created_at = DateTime::from_utc(message.created_at, Utc);
+            if add_pg_interval(&created_at, &queue.retention_timeout) < now {
+                to_delete.push(message.id);
+                continue;
+            }
+            if let Some(max_receives) = queue.max_receives {
+                if message.receives >= max_receives {
+                    // send to dead letter queue
+                    move_to_dead_letter_queue.push(message.id);
+                    // do not put a continue statement here, we still want to return this message
+                    // to the caller. So we send a message directly to the dead-letter-queue upon receive,
+                    // but we still allow the caller to process it. It will appear in the dead-letter-queue
+                    // after the visibility timeout and the caller will still be able to delete it via
+                    // its id regardless of the queue the message is in
+                }
+            }
+            result.push(message);
+        }
+        if !to_delete.is_empty() {
+            self.delete_messages_by_ids(to_delete)?;
+        }
+        if let Some(dead_letter_queue) = &queue.dead_letter_queue {
+            if !move_to_dead_letter_queue.is_empty() {
+                self.move_message_to_queue(move_to_dead_letter_queue, dead_letter_queue)?;
+            }
+        }
+        return Ok(result);
+    }
+
+    fn move_message_to_queue(&self, ids: Vec<Uuid>, new_queue: &str) -> QueryResult<usize> {
+        diesel::dsl::update(messages::table)
+            .set((
+                     messages::queue.eq(new_queue),
+                     messages::receives.eq(0),
+            ))
+            .filter(messages::id.eq_any(ids))
+            .execute(self.conn.deref())
+    }
+
+    fn delete_message_by_id(&self, id: Uuid) -> QueryResult<bool> {
+        diesel::delete(messages::table.filter(messages::id.eq(id)))
+            .execute(self.conn.deref())
+            .map(|count| count > 0)
+    }
+
+    fn delete_messages_by_ids(&self, ids: Vec<Uuid>) -> QueryResult<usize> {
+        diesel::delete(messages::table.filter(messages::id.eq_any(ids)))
+            .execute(self.conn.deref())
     }
 }
 
@@ -159,77 +241,3 @@ impl <F, V, DB> QueryFragment<DB> for In<F, V>
 
 impl <F, V, T, Table> AppearsOnTable<Table> for In<F, V>
     where F: Expression<SqlType=T> + AppearsOnTable<Table>, V: Expression<SqlType=T> + AppearsOnTable<Table> {}
-
-impl Message {
-    pub fn get_from_queue(conn: &PgConnection, queue: &Queue, count: i64)-> QueryResult<Vec<Message>> {
-        let now = Utc::now();
-        let visible_since = add_pg_interval(&now, &queue.visibility_timeout);
-
-        let update_query = diesel::dsl::update(messages::table)
-            .set((
-                     messages::visible_since.eq(visible_since.naive_utc()),
-                     messages::receives.eq(messages::receives + 1),
-            ))
-            .filter(In::new(
-                messages::id,
-                MessageIdsForFetch::new(&queue.name, now.naive_utc(), count),
-            ))
-            .returning(messages::all_columns);
-
-        let messages: Vec<Message> = update_query.get_results(conn)?;
-
-        // filter result, move messages to dead letter queues
-        let mut result = Vec::with_capacity(messages.len());
-        let mut move_to_dead_letter_queue = Vec::new();
-        let mut to_delete = Vec::new();
-        for message in messages {
-            let created_at = DateTime::from_utc(message.created_at, Utc);
-            if add_pg_interval(&created_at, &queue.retention_timeout) < now {
-                to_delete.push(message.id);
-                continue;
-            }
-            if let Some(max_receives) = queue.max_receives {
-                if message.receives >= max_receives {
-                    // send to dead letter queue
-                    move_to_dead_letter_queue.push(message.id);
-                    // do not put a continue statement here, we still want to return this message
-                    // to the caller. So we send a message directly to the dead-letter-queue upon receive,
-                    // but we still allow the caller to process it. It will appear in the dead-letter-queue
-                    // after the visibility timeout and the caller will still be able to delete it via
-                    // its id regardless of the queue the message is in
-                }
-            }
-            result.push(message);
-        }
-        if !to_delete.is_empty() {
-            Message::delete_by_ids(&conn, to_delete)?;
-        }
-        if let Some(dead_letter_queue) = &queue.dead_letter_queue {
-            if !move_to_dead_letter_queue.is_empty() {
-                Message::move_to_queue(&conn, move_to_dead_letter_queue, dead_letter_queue)?;
-            }
-        }
-        return Ok(result);
-    }
-
-    pub fn move_to_queue(conn: &PgConnection, ids: Vec<Uuid>, new_queue: &str) -> QueryResult<usize> {
-        diesel::dsl::update(messages::table)
-            .set((
-                     messages::queue.eq(new_queue),
-                     messages::receives.eq(0),
-            ))
-            .filter(messages::id.eq_any(ids))
-            .execute(conn)
-    }
-
-    pub fn delete_by_id(conn: &PgConnection, id: Uuid) -> QueryResult<bool> {
-        diesel::delete(messages::table.filter(messages::id.eq(id)))
-            .execute(conn)
-            .map(|count| count > 0)
-    }
-
-    pub fn delete_by_ids(conn: &PgConnection, ids: Vec<Uuid>) -> QueryResult<usize> {
-        diesel::delete(messages::table.filter(messages::id.eq_any(ids)))
-            .execute(conn)
-    }
-}

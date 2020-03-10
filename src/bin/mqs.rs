@@ -7,30 +7,39 @@ extern crate dotenv;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::io::Stdout;
+use std::ops::Deref;
 use dotenv::dotenv;
 use hyper::{Body, Request, Response, Server};
 use hyper::service::{make_service_fn, service_fn};
 use hyper::server::conn::AddrStream;
 use log::Level;
+use tokio::runtime::Builder;
+use cached::once_cell::sync::Lazy;
 
 use mqs::logger::json::Logger;
 use mqs::router::Router;
 use mqs::router::handler::{handle, make_router};
 use mqs::connection::{init_pool, Pool, DbConn};
-use tokio::runtime::Builder;
-use std::io::Stdout;
-use cached::once_cell::sync::Lazy;
-use std::ops::Deref;
+use mqs::models::PgRepository;
 
 struct HandlerService {
     pool: Pool,
-    router: Router<DbConn>,
+    router: Router<PgRepository>,
 }
 
 impl HandlerService {
+    fn new(pool: Pool, router: Router<PgRepository>) -> Self {
+        HandlerService { pool, router }
+    }
+
     async fn handle(&self, req: Request<Body>) -> Result<Response<Body>, Infallible> {
         let conn = self.pool.get().map_or_else(|_| None, |conn| Some(DbConn(conn)));
-        handle(conn, &self.router, req).await
+        let repo = match conn {
+            None => None,
+            Some(conn) => Some(PgRepository::new(conn)),
+        };
+        handle(repo, &self.router, req).await
     }
 }
 
@@ -52,7 +61,7 @@ fn main() {
     rt.block_on(async {
         // Setup and configure server...
         let addr = SocketAddr::from(([0, 0, 0, 0], 7843));
-        let service = Arc::new(HandlerService { pool: pool, router: make_router() });
+        let service = Arc::new(HandlerService::new(pool, make_router()));
         let make_service = make_service_fn(move |conn: &AddrStream| {
             let remote_addr = conn.remote_addr();
             info!("New connection from {}", remote_addr);

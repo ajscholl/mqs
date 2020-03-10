@@ -1,18 +1,23 @@
 use diesel::prelude::*;
-use diesel::pg::PgConnection;
-
 use diesel::sql_types::Int4;
 
+use crate::models::PgRepository;
+use std::ops::Deref;
+
 #[derive(QueryableByName)]
-pub struct Health {
+struct Health {
     #[sql_type = "Int4"]
-    pub response: i32,
+    response: i32,
 }
 
-impl Health {
-    pub fn check(conn: &PgConnection) -> bool {
+pub trait HealthCheckRepository {
+    fn check_health(&self) -> bool;
+}
+
+impl HealthCheckRepository for PgRepository {
+    fn check_health(&self) -> bool {
         let responses: Result<Vec<Health>, _> = diesel::sql_query("select 1 as response")
-            .load(conn);
+            .load(self.conn.deref());
         match responses {
             Ok(response) => response.iter().len() == 1 && response[0].response == 1,
             Err(_err) => false
