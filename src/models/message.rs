@@ -36,7 +36,7 @@ pub struct NewMessage<'a> {
     pub created_at: NaiveDateTime,
 }
 
-#[derive(Queryable, Associations, Identifiable, Serialize, Debug)]
+#[derive(Queryable, Associations, Identifiable, Serialize, Debug, Clone)]
 pub struct Message {
     pub id: Uuid,
     pub payload: Vec<u8>,
@@ -49,7 +49,7 @@ pub struct Message {
     pub created_at: NaiveDateTime,
 }
 
-fn add_pg_interval(time: &DateTime<Utc>, offset: &PgInterval) -> DateTime<Utc> {
+pub(crate) fn add_pg_interval(time: &DateTime<Utc>, offset: &PgInterval) -> DateTime<Utc> {
     let us = Duration::microseconds(offset.microseconds);
     let d = Duration::days(offset.days as i64);
     let m = Duration::days(offset.months as i64 * 30);

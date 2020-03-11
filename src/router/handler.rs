@@ -92,80 +92,126 @@ pub async fn handle<T>(conn: Option<T>, router: &Router<T>, mut req: Request<Bod
 #[cfg(test)]
 mod test {
     use super::*;
-    use diesel::QueryResult;
-    use crate::models::queue::{QueueInput, QueueDescription, Queue, QueueSource};
-    use uuid::Uuid;
-    use crate::models::message::{Message, MessageInput};
-    use diesel::result::Error;
-
-    struct TestRepo {
-        health: bool,
-    }
-
-    impl HealthCheckRepository for TestRepo {
-        fn check_health(&self) -> bool {
-            self.health
-        }
-    }
-
-    impl MessageRepository for TestRepo {
-        fn insert_message(&self, queue: &Queue, input: &MessageInput) -> QueryResult<bool> {
-            unimplemented!()
-        }
-
-        fn get_message_from_queue(&self, queue: &Queue, count: i64) -> QueryResult<Vec<Message>> {
-            unimplemented!()
-        }
-
-        fn move_message_to_queue(&self, ids: Vec<Uuid>, new_queue: &str) -> QueryResult<usize> {
-            unimplemented!()
-        }
-
-        fn delete_message_by_id(&self, id: Uuid) -> QueryResult<bool> {
-            unimplemented!()
-        }
-
-        fn delete_messages_by_ids(&self, ids: Vec<Uuid>) -> QueryResult<usize> {
-            unimplemented!()
-        }
-    }
-
-    impl QueueSource for TestRepo {
-        fn find_by_name(&self, name: &str) -> QueryResult<Option<Queue>> {
-            unimplemented!()
-        }
-    }
-
-    impl QueueRepository for TestRepo {
-        fn insert_queue(&self, queue: &QueueInput) -> QueryResult<Option<Queue>> {
-            unimplemented!()
-        }
-
-        fn count_queues(&self) -> QueryResult<i64> {
-            unimplemented!()
-        }
-
-        fn describe_queue(&self, name: &str) -> QueryResult<Option<QueueDescription>> {
-            unimplemented!()
-        }
-
-        fn list_queues(&self, offset: Option<i64>, limit: Option<i64>) -> QueryResult<Vec<Queue>> {
-            unimplemented!()
-        }
-
-        fn update_queue(&self, queue: &QueueInput) -> QueryResult<Option<Queue>> {
-            unimplemented!()
-        }
-
-        fn delete_queue_by_name(&self, name: &str) -> QueryResult<Option<Queue>> {
-            unimplemented!()
-        }
-    }
+    use crate::models::test::TestRepo;
+    use crate::routes::test::read_body;
+    use crate::status::Status;
+    use std::sync::Arc;
 
     #[test]
     fn health_router() {
         let router = make_router::<TestRepo>();
         let handler = router.route(&Method::GET, vec!["health"].into_iter());
         assert!(handler.is_some());
+        let handler = handler.unwrap();
+        {
+            let mut response = handler.handle(TestRepo::new(), Request::new(Body::default()), Vec::new());
+            assert_eq!(Status::Ok.to_hyper(), response.status());
+            let body = read_body(response.body_mut());
+            assert_eq!(body, "green".as_bytes().to_vec());
+        }
+        {
+            let mut repo = TestRepo::new();
+            repo.set_health(false);
+            let mut response = handler.handle(repo, Request::new(Body::default()), Vec::new());
+            assert_eq!(Status::Ok.to_hyper(), response.status());
+            let body = read_body(response.body_mut());
+            assert_eq!(body, "red".as_bytes().to_vec());
+        }
+    }
+
+    #[test]
+    fn queues_router() {
+        let router = make_router::<Arc<TestRepo>>();
+        let create_handler = router.route(&Method::PUT, vec!["queues", "my-queue"].into_iter());
+        assert!(create_handler.is_some());
+        let create_handler = create_handler.unwrap();
+        let repo = Arc::new(TestRepo::new());
+        {
+            let mut response = create_handler.handle(
+                repo.clone(),
+                Request::new(Body::default()),
+                "{\"retention_timeout\": 600, \"visibility_timeout\": 30, \"message_delay\": 5, \"message_deduplication\": false}".as_bytes().to_vec(),
+            );
+            assert_eq!(Status::Created.to_hyper(), response.status());
+            let body = read_body(response.body_mut());
+            assert_eq!(
+                body,
+                "{\"name\":\"my-queue\",\"redrive_policy\":null,\"retention_timeout\":600,\"visibility_timeout\":30,\"message_delay\":5,\"message_deduplication\":false}".as_bytes().to_vec(),
+            );
+        }
+        {
+            let mut response = create_handler.handle(
+                repo.clone(),
+                Request::new(Body::default()),
+                "{\"retention_timeout\": 600, \"visibility_timeout\": 60, \"message_delay\": 5, \"message_deduplication\": false}".as_bytes().to_vec(),
+            );
+            assert_eq!(Status::Conflict.to_hyper(), response.status());
+            let body = read_body(response.body_mut());
+            assert_eq!(
+                body.len(),
+                0,
+            );
+        }
+        let get_handler = router.route(&Method::GET, vec!["queues", "my-queue"].into_iter());
+        assert!(get_handler.is_some());
+        let get_handler = get_handler.unwrap();
+        {
+            let mut response = get_handler.handle(
+                repo.clone(),
+                Request::new(Body::default()),
+                Vec::new(),
+            );
+            assert_eq!(Status::Ok.to_hyper(), response.status());
+            let body = read_body(response.body_mut());
+            assert_eq!(
+                body,
+                "{\"name\":\"my-queue\",\"redrive_policy\":null,\"retention_timeout\":600,\"visibility_timeout\":30,\"message_delay\":5,\"message_deduplication\":false,\"status\":{\"messages\":0,\"visible_messages\":0,\"oldest_message_age\":0}}".as_bytes().to_vec(),
+            );
+        }
+        let update_handler = router.route(&Method::POST, vec!["queues", "my-queue"].into_iter());
+        assert!(update_handler.is_some());
+        let update_handler = update_handler.unwrap();
+        {
+            let mut response = update_handler.handle(
+                repo.clone(),
+                Request::new(Body::default()),
+                "{\"retention_timeout\": 30, \"visibility_timeout\": 10, \"message_delay\": 2, \"message_deduplication\": true}".as_bytes().to_vec(),
+            );
+            assert_eq!(Status::Ok.to_hyper(), response.status());
+            let body = read_body(response.body_mut());
+            assert_eq!(
+                body,
+                "{\"name\":\"my-queue\",\"redrive_policy\":null,\"retention_timeout\":30,\"visibility_timeout\":10,\"message_delay\":2,\"message_deduplication\":true}".as_bytes().to_vec(),
+            );
+        }
+        let delete_handler = router.route(&Method::DELETE, vec!["queues", "my-queue"].into_iter());
+        assert!(delete_handler.is_some());
+        let delete_handler = delete_handler.unwrap();
+        {
+            let mut response = delete_handler.handle(
+                repo.clone(),
+                Request::new(Body::default()),
+                Vec::new(),
+            );
+            assert_eq!(Status::Ok.to_hyper(), response.status());
+            let body = read_body(response.body_mut());
+            assert_eq!(
+                body,
+                "{\"name\":\"my-queue\",\"redrive_policy\":null,\"retention_timeout\":30,\"visibility_timeout\":10,\"message_delay\":2,\"message_deduplication\":true}".as_bytes().to_vec(),
+            );
+        }
+        {
+            let mut response = get_handler.handle(
+                repo.clone(),
+                Request::new(Body::default()),
+                Vec::new(),
+            );
+            assert_eq!(Status::NotFound.to_hyper(), response.status());
+            let body = read_body(response.body_mut());
+            assert_eq!(
+                body.len(),
+                0,
+            );
+        }
     }
 }

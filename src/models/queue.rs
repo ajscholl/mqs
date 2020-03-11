@@ -52,7 +52,7 @@ pub struct Queue {
     pub updated_at: NaiveDateTime,
 }
 
-fn pg_interval(mut seconds: i64) -> PgInterval {
+pub(crate) fn pg_interval(mut seconds: i64) -> PgInterval {
     if seconds < 0 {
         let int = pg_interval(-seconds);
 
@@ -82,10 +82,39 @@ pub struct QueueDescription {
     pub oldest_message_age: i64,
 }
 
-pub trait QueueSource: Sized {
+static CACHE_HITS: AtomicUsize = AtomicUsize::new(0);
+static CACHE_MISSES: AtomicUsize = AtomicUsize::new(0);
+static QUEUE_CACHE: Lazy<Mutex<TimedCache<String, Queue>>> = Lazy::new(|| Mutex::new(TimedCache::with_lifespan(10)));
+
+pub trait QueueSource {
     fn find_by_name(&self, name: &str) -> QueryResult<Option<Queue>>;
     fn find_by_name_cached(&self, name: &str) -> QueryResult<Option<Queue>> {
-        find_queue_by_name_cached(self, name)
+        let key = name.to_string();
+        if let Ok(mut cache) = QUEUE_CACHE.lock() {
+            let res = Cached::cache_get(&mut *cache, &key);
+            if let Some(cached_val) = res {
+                let cache_hits = CACHE_HITS.fetch_add(1, Ordering::Relaxed) + 1;
+                info!("Found queue of name {}, total {} cache hits", &cached_val.name, cache_hits);
+                return Ok(Some(cached_val.clone()));
+            }
+        } else {
+            error!("Failed to get queue cache lock");
+            return self.find_by_name(name);
+        }
+        let cache_misses = CACHE_MISSES.fetch_add(1, Ordering::Relaxed) + 1;
+        info!("Getting queue of name {}, total {} cache misses", name, cache_misses);
+        match self.find_by_name(name) {
+            Err(e) => Err(e),
+            Ok(None) => Ok(None),
+            Ok(Some(queue)) => {
+                if let Ok(mut cache) = QUEUE_CACHE.lock() {
+                    Cached::cache_set(&mut *cache, key, queue.clone());
+                } else {
+                    error!("Failed to get queue cache lock");
+                }
+                Ok(Some(queue))
+            }
+        }
     }
 }
 
@@ -216,39 +245,6 @@ impl QueueRepository for PgRepository {
             .returning(queues::all_columns)
             .get_result(self.conn.deref())
             .optional()
-    }
-}
-
-static CACHE_HITS: AtomicUsize = AtomicUsize::new(0);
-static CACHE_MISSES: AtomicUsize = AtomicUsize::new(0);
-static QUEUE_CACHE: Lazy<Mutex<TimedCache<String, Queue>>> = Lazy::new(|| Mutex::new(TimedCache::with_lifespan(10)));
-
-fn find_queue_by_name_cached<R: QueueSource>(repo: &R, queue_name: &str) -> QueryResult<Option<Queue>> {
-    let key = queue_name.to_string();
-    if let Ok(mut cache) = QUEUE_CACHE.lock() {
-        let res = Cached::cache_get(&mut *cache, &key);
-        if let Some(cached_val) = res {
-            let cache_hits = CACHE_HITS.fetch_add(1, Ordering::Relaxed) + 1;
-            info!("Found queue of name {}, total {} cache hits", &cached_val.name, cache_hits);
-            return Ok(Some(cached_val.clone()));
-        }
-    } else {
-        error!("Failed to get queue cache lock");
-        return repo.find_by_name(queue_name);
-    }
-    let cache_misses = CACHE_MISSES.fetch_add(1, Ordering::Relaxed) + 1;
-    info!("Getting queue of name {}, total {} cache misses", queue_name, cache_misses);
-    match repo.find_by_name(queue_name) {
-        Err(e) => Err(e),
-        Ok(None) => Ok(None),
-        Ok(Some(queue)) => {
-            if let Ok(mut cache) = QUEUE_CACHE.lock() {
-                Cached::cache_set(&mut *cache, key, queue.clone());
-            } else {
-                error!("Failed to get queue cache lock");
-            }
-            Ok(Some(queue))
-        }
     }
 }
 

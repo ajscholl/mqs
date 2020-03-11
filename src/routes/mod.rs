@@ -108,13 +108,13 @@ impl MqsResponse {
 }
 
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
     use super::*;
     use crate::client::Service;
     use tokio::runtime::Builder;
     use chrono::Utc;
 
-    fn read_body(body: &mut Body) -> Vec<u8> {
+    pub(crate) fn read_body(body: &mut Body) -> Vec<u8> {
         let mut rt = Builder::new()
             .enable_all()
             .basic_scheduler()

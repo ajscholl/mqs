@@ -1,8 +1,8 @@
 use diesel::prelude::*;
 use diesel::sql_types::Int4;
+use std::ops::Deref;
 
 use crate::models::PgRepository;
-use std::ops::Deref;
 
 #[derive(QueryableByName)]
 struct Health {
