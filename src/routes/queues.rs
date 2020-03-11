@@ -138,7 +138,7 @@ pub fn delete_queue<R: QueueRepository>(repo: R, queue_name: &str) -> MqsRespons
             MqsResponse::json(&QueueConfigOutput::new(queue))
         },
         Ok(None) => {
-            info!("Message {} was not found", queue_name);
+            info!("Queue {} was not found", queue_name);
             MqsResponse::status(Status::NotFound)
         },
         Err(err) => {

@@ -96,6 +96,8 @@ mod test {
     use crate::routes::test::read_body;
     use crate::status::Status;
     use std::sync::Arc;
+    use crate::models::queue::QueueInput;
+    use hyper::header::HeaderName;
 
     #[test]
     fn health_router() {
@@ -121,11 +123,11 @@ mod test {
 
     #[test]
     fn queues_router() {
+        let repo = Arc::new(TestRepo::new());
         let router = make_router::<Arc<TestRepo>>();
         let create_handler = router.route(&Method::PUT, vec!["queues", "my-queue"].into_iter());
         assert!(create_handler.is_some());
         let create_handler = create_handler.unwrap();
-        let repo = Arc::new(TestRepo::new());
         {
             let mut response = create_handler.handle(
                 repo.clone(),
@@ -168,6 +170,22 @@ mod test {
                 "{\"name\":\"my-queue\",\"redrive_policy\":null,\"retention_timeout\":600,\"visibility_timeout\":30,\"message_delay\":5,\"message_deduplication\":false,\"status\":{\"messages\":0,\"visible_messages\":0,\"oldest_message_age\":0}}".as_bytes().to_vec(),
             );
         }
+        let list_handler = router.route(&Method::GET, vec!["queues"].into_iter());
+        assert!(list_handler.is_some());
+        let list_handler = list_handler.unwrap();
+        {
+            let mut response = list_handler.handle(
+                repo.clone(),
+                Request::new(Body::default()),
+                Vec::new(),
+            );
+            assert_eq!(Status::Ok.to_hyper(), response.status());
+            let body = read_body(response.body_mut());
+            assert_eq!(
+                body,
+                "{\"queues\":[{\"name\":\"my-queue\",\"redrive_policy\":null,\"retention_timeout\":600,\"visibility_timeout\":30,\"message_delay\":5,\"message_deduplication\":false}],\"total\":1}".as_bytes().to_vec(),
+            );
+        }
         let update_handler = router.route(&Method::POST, vec!["queues", "my-queue"].into_iter());
         assert!(update_handler.is_some());
         let update_handler = update_handler.unwrap();
@@ -207,6 +225,72 @@ mod test {
                 Vec::new(),
             );
             assert_eq!(Status::NotFound.to_hyper(), response.status());
+            let body = read_body(response.body_mut());
+            assert_eq!(
+                body.len(),
+                0,
+            );
+        }
+    }
+
+    #[test]
+    fn messages_router() {
+        let repo = Arc::new(TestRepo::new());
+        repo.insert_queue(&QueueInput {
+            name: "my-queue",
+            max_receives: None,
+            dead_letter_queue: None,
+            retention_timeout: 100,
+            visibility_timeout: 10,
+            message_delay: 0,
+            content_based_deduplication: false,
+        }).unwrap().unwrap();
+        let router = make_router::<Arc<TestRepo>>();
+        let publish_handler = router.route(&Method::POST, vec!["messages", "my-queue"].into_iter());
+        assert!(publish_handler.is_some());
+        let publish_handler = publish_handler.unwrap();
+        {
+            let mut response = publish_handler.handle(
+                repo.clone(),
+                Request::new(Body::default()),
+                "{\"content\": \"my message\"}".as_bytes().to_vec(),
+            );
+            assert_eq!(Status::Created.to_hyper(), response.status());
+            let body = read_body(response.body_mut());
+            assert_eq!(
+                body.len(),
+                0,
+            );
+        }
+        let receive_handler = router.route(&Method::GET, vec!["messages", "my-queue"].into_iter());
+        assert!(receive_handler.is_some());
+        let receive_handler = receive_handler.unwrap();
+        let message_id = {
+            let mut response = receive_handler.handle(
+                repo.clone(),
+                Request::new(Body::default()),
+                Vec::new(),
+            );
+            assert_eq!(Status::Ok.to_hyper(), response.status());
+            let body = read_body(response.body_mut());
+            assert_eq!(
+                body,
+                "{\"content\": \"my message\"}".as_bytes().to_vec(),
+            );
+            let response_message_id = response.headers().get(HeaderName::from_static("x-mqs-message-id"));
+            assert!(response_message_id.is_some());
+            response_message_id.unwrap().to_str().unwrap().to_string()
+        };
+        {
+            let delete_handler = router.route(&Method::DELETE, vec!["messages", &message_id].into_iter());
+            assert!(delete_handler.is_some());
+            let delete_handler = delete_handler.unwrap();
+            let mut response = delete_handler.handle(
+                repo.clone(),
+                Request::new(Body::default()),
+                Vec::new(),
+            );
+            assert_eq!(Status::Ok.to_hyper(), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(
                 body.len(),
