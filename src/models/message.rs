@@ -1,52 +1,53 @@
-use chrono::{NaiveDateTime, Utc, DateTime};
-use diesel::prelude::*;
-use diesel::pg::Pg;
-use diesel::pg::types::date_and_time::PgInterval;
-use diesel::result::{Error, DatabaseErrorKind};
-use diesel::query_builder::{QueryFragment, AstPass};
-use diesel::backend::Backend;
+use chrono::{DateTime, NaiveDateTime, Utc};
+use diesel::{
+    backend::Backend,
+    pg::{types::date_and_time::PgInterval, Pg},
+    prelude::*,
+    query_builder::{AstPass, QueryFragment},
+    result::{DatabaseErrorKind, Error},
+};
+use sha2::{digest::Input, Digest, Sha256};
+use std::ops::{Add, Deref};
 use time::Duration;
 use uuid::Uuid;
-use sha2::{Sha256, Digest};
-use sha2::digest::Input;
-use std::ops::{Add, Deref};
 
-use crate::schema::messages;
-use crate::models::queue::Queue;
-use crate::models::PgRepository;
+use crate::{
+    models::{queue::Queue, PgRepository},
+    schema::messages,
+};
 
 #[derive(Debug)]
 pub struct MessageInput<'a> {
-    pub payload: &'a [u8],
-    pub content_type: &'a str,
+    pub payload:          &'a [u8],
+    pub content_type:     &'a str,
     pub content_encoding: Option<&'a str>,
 }
 
 #[derive(Insertable)]
-#[table_name="messages"]
+#[table_name = "messages"]
 pub struct NewMessage<'a> {
-    pub id: Uuid,
-    pub payload: &'a [u8],
-    pub content_type: &'a str,
+    pub id:               Uuid,
+    pub payload:          &'a [u8],
+    pub content_type:     &'a str,
     pub content_encoding: Option<&'a str>,
-    pub hash: Option<String>,
-    pub queue: &'a str,
-    pub receives: i32,
-    pub visible_since: NaiveDateTime,
-    pub created_at: NaiveDateTime,
+    pub hash:             Option<String>,
+    pub queue:            &'a str,
+    pub receives:         i32,
+    pub visible_since:    NaiveDateTime,
+    pub created_at:       NaiveDateTime,
 }
 
 #[derive(Queryable, Associations, Identifiable, Serialize, Debug, Clone)]
 pub struct Message {
-    pub id: Uuid,
-    pub payload: Vec<u8>,
-    pub content_type: String,
+    pub id:               Uuid,
+    pub payload:          Vec<u8>,
+    pub content_type:     String,
     pub content_encoding: Option<String>,
-    pub hash: Option<String>,
-    pub queue: String,
-    pub receives: i32,
-    pub visible_since: NaiveDateTime,
-    pub created_at: NaiveDateTime,
+    pub hash:             Option<String>,
+    pub queue:            String,
+    pub receives:         i32,
+    pub visible_since:    NaiveDateTime,
+    pub created_at:       NaiveDateTime,
 }
 
 pub(crate) fn add_pg_interval(time: &DateTime<Utc>, offset: &PgInterval) -> DateTime<Utc> {
@@ -56,9 +57,9 @@ pub(crate) fn add_pg_interval(time: &DateTime<Utc>, offset: &PgInterval) -> Date
     time.add(us + d + m)
 }
 
-pub trait MessageRepository {
+pub trait MessageRepository: Send {
     fn insert_message(&self, queue: &Queue, input: &MessageInput) -> QueryResult<bool>;
-    fn get_message_from_queue(&self, queue: &Queue, count: i64)-> QueryResult<Vec<Message>>;
+    fn get_message_from_queue(&self, queue: &Queue, count: i64) -> QueryResult<Vec<Message>>;
     fn move_message_to_queue(&self, ids: Vec<Uuid>, new_queue: &str) -> QueryResult<usize>;
     fn delete_message_by_id(&self, id: Uuid) -> QueryResult<bool>;
     fn delete_messages_by_ids(&self, ids: Vec<Uuid>) -> QueryResult<usize>;
@@ -74,7 +75,9 @@ impl MessageRepository for PgRepository {
             Input::input(&mut digest, input.payload);
             let result = digest.result();
             Some(base64::encode(result.as_slice()))
-        } else { None };
+        } else {
+            None
+        };
         let result = diesel::dsl::insert_into(messages::table)
             .values(NewMessage {
                 id,
@@ -95,15 +98,14 @@ impl MessageRepository for PgRepository {
         }
     }
 
-
-    fn get_message_from_queue(&self, queue: &Queue, count: i64)-> QueryResult<Vec<Message>> {
+    fn get_message_from_queue(&self, queue: &Queue, count: i64) -> QueryResult<Vec<Message>> {
         let now = Utc::now();
         let visible_since = add_pg_interval(&now, &queue.visibility_timeout);
 
         let update_query = diesel::dsl::update(messages::table)
             .set((
-                     messages::visible_since.eq(visible_since.naive_utc()),
-                     messages::receives.eq(messages::receives + 1),
+                messages::visible_since.eq(visible_since.naive_utc()),
+                messages::receives.eq(messages::receives + 1),
             ))
             .filter(In::new(
                 messages::id,
@@ -149,10 +151,7 @@ impl MessageRepository for PgRepository {
 
     fn move_message_to_queue(&self, ids: Vec<Uuid>, new_queue: &str) -> QueryResult<usize> {
         diesel::dsl::update(messages::table)
-            .set((
-                     messages::queue.eq(new_queue),
-                     messages::receives.eq(0),
-            ))
+            .set((messages::queue.eq(new_queue), messages::receives.eq(0)))
             .filter(messages::id.eq_any(ids))
             .execute(self.conn.deref())
     }
@@ -164,18 +163,17 @@ impl MessageRepository for PgRepository {
     }
 
     fn delete_messages_by_ids(&self, ids: Vec<Uuid>) -> QueryResult<usize> {
-        diesel::delete(messages::table.filter(messages::id.eq_any(ids)))
-            .execute(self.conn.deref())
+        diesel::delete(messages::table.filter(messages::id.eq_any(ids))).execute(self.conn.deref())
     }
 }
 
 struct MessageIdsForFetch<'a> {
-    queue_name: &'a str,
+    queue_name:    &'a str,
     visible_since: NaiveDateTime,
-    count: i64,
+    count:         i64,
 }
 
-impl <'a> MessageIdsForFetch<'a> {
+impl<'a> MessageIdsForFetch<'a> {
     fn new(queue_name: &'a str, visible_since: NaiveDateTime, count: i64) -> MessageIdsForFetch<'a> {
         MessageIdsForFetch {
             queue_name,
@@ -185,14 +183,18 @@ impl <'a> MessageIdsForFetch<'a> {
     }
 }
 
-impl <'a> QueryFragment<Pg> for MessageIdsForFetch<'a> {
+impl<'a> QueryFragment<Pg> for MessageIdsForFetch<'a> {
     fn walk_ast(&self, mut out: AstPass<Pg>) -> QueryResult<()> {
         // select all elements which are currently visible, take the first elements visible
         // and limit to the maximum number of elements we want to process.
         // skip any locked elements and lock our elements for update.
         let sub_query = messages::table
             .select(messages::id)
-            .filter(messages::queue.eq(self.queue_name).and(messages::visible_since.le(self.visible_since)))
+            .filter(
+                messages::queue
+                    .eq(self.queue_name)
+                    .and(messages::visible_since.le(self.visible_since)),
+            )
             .order(messages::visible_since.asc())
             .for_update()
             .skip_locked()
@@ -204,33 +206,37 @@ impl <'a> QueryFragment<Pg> for MessageIdsForFetch<'a> {
     }
 }
 
-impl <'a> Expression for MessageIdsForFetch<'a> {
+impl<'a> Expression for MessageIdsForFetch<'a> {
     type SqlType = <messages::columns::id as Expression>::SqlType;
 }
 
-impl <'a> AppearsOnTable<messages::table> for MessageIdsForFetch<'a> {}
+impl<'a> AppearsOnTable<messages::table> for MessageIdsForFetch<'a> {}
 
 struct In<F, V> {
-    field: F,
+    field:  F,
     values: V,
 }
 
-impl <F, V, T> Expression for In<F, V>
-    where F: Expression<SqlType=T>, V: Expression<SqlType=T> {
+impl<F, V, T> Expression for In<F, V>
+where
+    F: Expression<SqlType = T>,
+    V: Expression<SqlType = T>,
+{
     type SqlType = diesel::sql_types::Bool;
 }
 
-impl <F, V> In<F, V> {
+impl<F, V> In<F, V> {
     fn new(field: F, values: V) -> In<F, V> {
-        In {
-            field,
-            values,
-        }
+        In { field, values }
     }
 }
 
-impl <F, V, DB> QueryFragment<DB> for In<F, V>
-    where DB: Backend, F: QueryFragment<DB>, V: QueryFragment<DB> {
+impl<F, V, DB> QueryFragment<DB> for In<F, V>
+where
+    DB: Backend,
+    F: QueryFragment<DB>,
+    V: QueryFragment<DB>,
+{
     fn walk_ast(&self, mut out: AstPass<DB>) -> QueryResult<()> {
         self.field.walk_ast(out.reborrow())?;
         out.push_sql(" IN ");
@@ -239,5 +245,9 @@ impl <F, V, DB> QueryFragment<DB> for In<F, V>
     }
 }
 
-impl <F, V, T, Table> AppearsOnTable<Table> for In<F, V>
-    where F: Expression<SqlType=T> + AppearsOnTable<Table>, V: Expression<SqlType=T> + AppearsOnTable<Table> {}
+impl<F, V, T, Table> AppearsOnTable<Table> for In<F, V>
+where
+    F: Expression<SqlType = T> + AppearsOnTable<Table>,
+    V: Expression<SqlType = T> + AppearsOnTable<Table>,
+{
+}

@@ -1,8 +1,7 @@
 use diesel::pg::PgConnection;
-use std::env;
-use std::ops::Deref;
 use r2d2;
 use r2d2_diesel::ConnectionManager;
+use std::{env, ops::Deref, time::Duration};
 
 pub type Pool = r2d2::Pool<ConnectionManager<PgConnection>>;
 
@@ -14,6 +13,7 @@ pub fn init_pool() -> (Pool, u16) {
     let pool = Pool::builder()
         .min_idle(Some(min_size as u32))
         .max_size(max_size as u32)
+        .connection_timeout(Duration::from_secs(1))
         .build(manager)
         .expect("Failed to initialize database pool");
 

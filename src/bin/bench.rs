@@ -1,16 +1,19 @@
 extern crate chrono;
 extern crate hyper;
 
-use mqs::client::Service;
-use mqs::routes::queues::QueueConfig;
+use mqs::{client::Service, routes::queues::QueueConfig};
 
-use std::error::Error;
-use std::fmt::{Display, Formatter};
-use std::env;
 use chrono::Utc;
-use std::ops::Sub;
-use hyper::HeaderMap;
-use hyper::header::{HeaderValue, CONTENT_TYPE, CONTENT_ENCODING};
+use hyper::{
+    header::{HeaderValue, CONTENT_ENCODING, CONTENT_TYPE},
+    HeaderMap,
+};
+use std::{
+    env,
+    error::Error,
+    fmt::{Display, Formatter},
+    ops::Sub,
+};
 use tokio::runtime::Builder;
 
 type AnyError = Box<dyn std::error::Error + Send + Sync>;
@@ -64,13 +67,15 @@ fn main() -> Result<(), AnyError> {
 
         // create some test queues
         for i in 0..queue_count {
-            let result = s.create_queue(&format!("test-queue-{}", i), &QueueConfig {
-                redrive_policy: None,
-                retention_timeout: 3600,
-                visibility_timeout: 5,
-                message_delay: 0,
-                message_deduplication: false,
-            }).await?;
+            let result = s
+                .create_queue(&format!("test-queue-{}", i), &QueueConfig {
+                    redrive_policy:        None,
+                    retention_timeout:     3600,
+                    visibility_timeout:    100,
+                    message_delay:         0,
+                    message_deduplication: false,
+                })
+                .await?;
 
             if result.is_none() {
                 Err(StringError::new("Failed to create queue"))?;
@@ -79,13 +84,15 @@ fn main() -> Result<(), AnyError> {
 
         // update test queues
         for i in 0..queue_count {
-            let result = s.update_queue(&format!("test-queue-{}", i), &QueueConfig {
-                redrive_policy: None,
-                retention_timeout: 3600,
-                visibility_timeout: 10,
-                message_delay: 0,
-                message_deduplication: false,
-            }).await?;
+            let result = s
+                .update_queue(&format!("test-queue-{}", i), &QueueConfig {
+                    redrive_policy:        None,
+                    retention_timeout:     3600,
+                    visibility_timeout:    300,
+                    message_delay:         0,
+                    message_deduplication: false,
+                })
+                .await?;
 
             if result.is_none() {
                 Err(StringError::new("Failed to update queue"))?;
@@ -98,9 +105,7 @@ fn main() -> Result<(), AnyError> {
         for i in 0..queue_count {
             let queue = format!("test-queue-{}", i);
             let queue2 = queue.clone();
-            let handle = tokio::spawn(async move {
-                publish_messages(i, queue2).await.unwrap()
-            });
+            let handle = tokio::spawn(async move { publish_messages(i, queue2).await.unwrap() });
             pending.push((queue, handle));
         }
 
@@ -124,30 +129,57 @@ fn main() -> Result<(), AnyError> {
         for i in 0..queue_count {
             let queue = format!("test-queue-{}", i);
             let queue2 = queue.clone();
-            let handle = tokio::spawn(async move {
-                consume_messages(i, queue2).await.unwrap()
-            });
+            let handle = tokio::spawn(async move { consume_messages(i, queue2, None).await.unwrap() });
             pending.push((queue, handle));
         }
 
         for (queue, work) in pending {
             work.await?;
-            let info = s.describe_queue(&queue).await?;
-            if let Some(description) = info {
-                if description.status.messages != 0 {
-                    Err(StringError::new("Queue not yet empty"))?;
-                }
-            } else {
-                Err(StringError::new("Failed to describe queue"))?;
-            }
+            check_queue_empty(&s, &queue).await?;
         }
 
         let end_consume = Utc::now();
         let consume_took = end_consume.sub(start_consume);
         println!("Consuming took: {}", consume_took);
 
+        let start_publish_and_consume = Utc::now();
+
+        let mut pending = Vec::with_capacity(queue_count);
+
+        for i in 0..queue_count {
+            let queue = format!("test-queue-{}", i);
+            let queue2 = queue.clone();
+            let handle_publish = tokio::spawn(async move { publish_messages(i, queue2).await.unwrap() });
+            let queue2 = queue.clone();
+            let handle_consume = tokio::spawn(async move { consume_messages(i, queue2, Some(10)).await.unwrap() });
+            pending.push((queue, handle_publish, handle_consume));
+        }
+
+        for (queue, work_publish, work_consume) in pending {
+            work_publish.await?;
+            work_consume.await?;
+            check_queue_empty(&s, &queue).await?;
+        }
+
+        let end_publish_and_consume = Utc::now();
+        let publish_and_consume_took = end_publish_and_consume.sub(start_publish_and_consume);
+        println!("Publishing and consuming took: {}", publish_and_consume_took);
+
         Ok(())
     })
+}
+
+async fn check_queue_empty(s: &Service, queue: &str) -> Result<(), AnyError> {
+    let info = s.describe_queue(queue).await?;
+    if let Some(description) = info {
+        if description.status.messages != 0 {
+            Err(StringError::new("Queue not yet empty"))?
+        } else {
+            Ok(())
+        }
+    } else {
+        Err(StringError::new("Failed to describe queue"))?
+    }
 }
 
 const DEFAULT_MESSAGE: [&'static [u8]; 3] = [
@@ -155,21 +187,16 @@ const DEFAULT_MESSAGE: [&'static [u8]; 3] = [
     &[6, 3, 6, 8, 0, 0, 0, 1, 5, 22, 254, 0, 32, 100, 128, 0],
     &[1, 2, 5, 3, 7, 4, 98, 66, 127, 0, 255, 192],
 ];
-const DEFAULT_MESSAGE_CONTENT_TYPE: [&'static str; 3] = [
-    "application/json",
-    "text/html",
-    "image/png",
-];
-const DEFAULT_MESSAGE_CONTENT_ENCODING: [Option<&'static str>; 3] = [
-    Some("identity"),
-    Some("gzip"),
-    None,
-];
+const DEFAULT_MESSAGE_CONTENT_TYPE: [&'static str; 3] = ["application/json", "text/html", "image/png"];
+const DEFAULT_MESSAGE_CONTENT_ENCODING: [Option<&'static str>; 3] = [Some("identity"), Some("gzip"), None];
 
 async fn publish_messages(index: usize, queue: String) -> Result<(), AnyError> {
     let s = get_service();
     let mut headers = HeaderMap::new();
-    headers.insert(CONTENT_TYPE, HeaderValue::from_static(DEFAULT_MESSAGE_CONTENT_TYPE[index % DEFAULT_MESSAGE_CONTENT_TYPE.len()]));
+    headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static(DEFAULT_MESSAGE_CONTENT_TYPE[index % DEFAULT_MESSAGE_CONTENT_TYPE.len()]),
+    );
     if let Some(value) = DEFAULT_MESSAGE_CONTENT_ENCODING[index % DEFAULT_MESSAGE_CONTENT_ENCODING.len()] {
         headers.insert(CONTENT_ENCODING, HeaderValue::from_static(value));
     }
@@ -188,19 +215,20 @@ async fn publish_messages(index: usize, queue: String) -> Result<(), AnyError> {
     Ok(())
 }
 
-async fn consume_messages(index: usize, queue: String) -> Result<(), AnyError> {
+async fn consume_messages(index: usize, queue: String, timeout: Option<u16>) -> Result<(), AnyError> {
     let mut handles = Vec::with_capacity(NUM_THREADS);
     for _ in 0..handles.capacity() {
         let queue_name = queue.clone();
         let handle = tokio::spawn(async move {
             let s = get_service();
             loop {
-                let messages = s.get_messages(&queue_name, 10).await?;
+                let messages = s.get_messages(&queue_name, 10, timeout).await?;
                 if messages.is_empty() {
                     break;
                 }
                 for message in messages {
-                    if &message.content_type != DEFAULT_MESSAGE_CONTENT_TYPE[index % DEFAULT_MESSAGE_CONTENT_TYPE.len()] {
+                    if &message.content_type != DEFAULT_MESSAGE_CONTENT_TYPE[index % DEFAULT_MESSAGE_CONTENT_TYPE.len()]
+                    {
                         Err(StringError::new("Message content type does not match"))?;
                     }
                     match DEFAULT_MESSAGE_CONTENT_ENCODING[index % DEFAULT_MESSAGE_CONTENT_ENCODING.len()] {

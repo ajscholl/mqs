@@ -1,8 +1,12 @@
+use hyper::{
+    header::{HeaderName, HeaderValue, InvalidHeaderName, InvalidHeaderValue},
+    HeaderMap,
+};
+use std::{
+    error::Error,
+    fmt::{Display, Formatter},
+};
 use uuid::Uuid;
-use hyper::HeaderMap;
-use hyper::header::{HeaderName, HeaderValue, InvalidHeaderName, InvalidHeaderValue};
-use std::fmt::{Display, Formatter};
-use std::error::Error;
 
 /// Encode data as a multipart/mixed document, return the boundary and the body
 pub fn encode(messages: &Vec<(HeaderMap, Vec<u8>)>) -> (String, Vec<u8>) {
@@ -79,7 +83,6 @@ pub enum ParseError {
     InvalidHeaderValue,
 }
 
-
 impl Display for ParseError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self)
@@ -152,7 +155,10 @@ pub fn parse<'a, 'b>(boundary: &'b [u8], body: &'a [u8]) -> Result<Vec<(HeaderMa
                 let mut headers = HeaderMap::new();
                 for header in split(header_text, "\r\n".as_bytes()) {
                     if let Some((name, body)) = split_by(header, ":".as_bytes()) {
-                        headers.insert(HeaderName::from_bytes(name)?, HeaderValue::from_bytes(trim_bytes(body))?);
+                        headers.insert(
+                            HeaderName::from_bytes(name)?,
+                            HeaderValue::from_bytes(trim_bytes(body))?,
+                        );
                     }
                 }
 
@@ -167,7 +173,7 @@ pub fn parse<'a, 'b>(boundary: &'b [u8], body: &'a [u8]) -> Result<Vec<(HeaderMa
 }
 
 pub struct Split<'a, 'b> {
-    data: Option<&'a [u8]>,
+    data:     Option<&'a [u8]>,
     split_by: &'b [u8],
 }
 
@@ -209,7 +215,7 @@ pub fn split_by<'a, 'b>(data: &'a [u8], split_by: &'b [u8]) -> Option<(&'a [u8],
 
     while i < end {
         if data[i..].starts_with(split_by) {
-            return Some((&data[.. i], &data[i + split_by.len() ..]));
+            return Some((&data[..i], &data[i + split_by.len()..]));
         }
 
         i += 1;
@@ -229,7 +235,7 @@ pub fn trim_bytes(data: &[u8]) -> &[u8] {
         end -= 1;
     }
 
-    &data[start .. end + 1]
+    &data[start..end + 1]
 }
 
 #[cfg(test)]
@@ -238,21 +244,39 @@ mod test {
 
     fn get_input() -> Vec<(HeaderMap, Vec<u8>)> {
         vec![
-            ({
-                 let mut m = HeaderMap::new();
-                 m.insert(HeaderName::from_static("content-type"), HeaderValue::from_static("data/type"));
-                 m
-             }, "This is my first message".as_bytes().to_vec()),
-            ({
-                 let mut m = HeaderMap::new();
-                 m.insert(HeaderName::from_static("content-type"), HeaderValue::from_static("data/another-type"));
-                 m
-             }, "\r\nAnother message\r\nWith more than one line\r\n".as_bytes().to_vec()),
-            ({
-                 let mut m = HeaderMap::new();
-                 m.insert(HeaderName::from_static("content-type"), HeaderValue::from_static("foo/bar"));
-                 m
-             }, "Last message, don't forget it".as_bytes().to_vec()),
+            (
+                {
+                    let mut m = HeaderMap::new();
+                    m.insert(
+                        HeaderName::from_static("content-type"),
+                        HeaderValue::from_static("data/type"),
+                    );
+                    m
+                },
+                "This is my first message".as_bytes().to_vec(),
+            ),
+            (
+                {
+                    let mut m = HeaderMap::new();
+                    m.insert(
+                        HeaderName::from_static("content-type"),
+                        HeaderValue::from_static("data/another-type"),
+                    );
+                    m
+                },
+                "\r\nAnother message\r\nWith more than one line\r\n".as_bytes().to_vec(),
+            ),
+            (
+                {
+                    let mut m = HeaderMap::new();
+                    m.insert(
+                        HeaderName::from_static("content-type"),
+                        HeaderValue::from_static("foo/bar"),
+                    );
+                    m
+                },
+                "Last message, don't forget it".as_bytes().to_vec(),
+            ),
         ]
     }
 
@@ -295,7 +319,13 @@ mod test {
     #[test]
     fn encode_multipart() {
         let (boundary, body) = encode(&get_input());
-        assert_eq!(std::str::from_utf8(body.as_slice()).unwrap(), format!("--{}\r\ncontent-type: data/type\r\n\r\nThis is my first message\r\n--{}\r\ncontent-type: data/another-type\r\n\r\n\r\nAnother message\r\nWith more than one line\r\n\r\n--{}\r\ncontent-type: foo/bar\r\n\r\nLast message, don\'t forget it\r\n--{}--", &boundary, &boundary, &boundary, &boundary));
+        assert_eq!(
+            std::str::from_utf8(body.as_slice()).unwrap(),
+            format!(
+                "--{}\r\ncontent-type: data/type\r\n\r\nThis is my first message\r\n--{}\r\ncontent-type: data/another-type\r\n\r\n\r\nAnother message\r\nWith more than one line\r\n\r\n--{}\r\ncontent-type: foo/bar\r\n\r\nLast message, don\'t forget it\r\n--{}--",
+                &boundary, &boundary, &boundary, &boundary
+            )
+        );
     }
 
     #[test]
@@ -306,22 +336,41 @@ mod test {
         assert_eq!(None, super::is_multipart("multipart/alternative; boundary=abc"));
         assert_eq!(None, super::is_multipart("multipart/mixed"));
         assert_eq!(None, super::is_multipart("multipart/mixed; foo=bar"));
-        assert_eq!(Some("--abc".to_string()), super::is_multipart("multipart/mixed; boundary=abc"));
-        assert_eq!(Some("--my boundary".to_string()), super::is_multipart("multipart/mixed; boundary=\"my boundary\""));
-        assert_eq!(Some("--my boundary".to_string()), super::is_multipart("multipart/mixed; foo=abc; boundary=\"my boundary\""));
-        assert_eq!(Some("--abc".to_string()), super::is_multipart("multipart/mixed; boundary=abc; foo=bar"));
+        assert_eq!(
+            Some("--abc".to_string()),
+            super::is_multipart("multipart/mixed; boundary=abc")
+        );
+        assert_eq!(
+            Some("--my boundary".to_string()),
+            super::is_multipart("multipart/mixed; boundary=\"my boundary\"")
+        );
+        assert_eq!(
+            Some("--my boundary".to_string()),
+            super::is_multipart("multipart/mixed; foo=abc; boundary=\"my boundary\"")
+        );
+        assert_eq!(
+            Some("--abc".to_string()),
+            super::is_multipart("multipart/mixed; boundary=abc; foo=bar")
+        );
     }
 
     #[test]
     fn parse_multipart() {
-        let parsed = parse("--abc".as_bytes(), "ignore this\r\n--abc\r\nContent-Type: text/plain\r\n\r\nThis is my text\r\n--abc\r\n\r\nThis has no content type\r\n\r\n--abc--this is ignored".as_bytes());
+        let parsed = parse(
+            "--abc".as_bytes(),
+            "ignore this\r\n--abc\r\nContent-Type: text/plain\r\n\r\nThis is my text\r\n--abc\r\n\r\nThis has no content type\r\n\r\n--abc--this is ignored"
+                .as_bytes(),
+        );
         assert!(parsed.is_ok());
         let parsed = parsed.unwrap();
         println!("{:?}", parsed);
         assert_eq!(parsed.len(), 2);
         assert_eq!(parsed[0].0, {
             let mut m = HeaderMap::new();
-            m.insert(HeaderName::from_static("content-type"), HeaderValue::from_static("text/plain"));
+            m.insert(
+                HeaderName::from_static("content-type"),
+                HeaderValue::from_static("text/plain"),
+            );
             m
         });
         assert_eq!(parsed[0].1, "This is my text".as_bytes());
@@ -337,7 +386,10 @@ mod test {
         let body_string = std::str::from_utf8(body.as_slice());
         assert!(body_string.is_ok());
         let body_string = body_string.unwrap();
-        assert_eq!(super::is_multipart(&format!("multipart/mixed; boundary={}", &boundary)), Some(format!("--{}", &boundary)));
+        assert_eq!(
+            super::is_multipart(&format!("multipart/mixed; boundary={}", &boundary)),
+            Some(format!("--{}", &boundary))
+        );
         let parsed = parse(format!("--{}", boundary).as_bytes(), body_string.as_bytes());
         assert!(parsed.is_ok());
         let parsed = parsed.unwrap();

@@ -1,55 +1,58 @@
+use cached::{once_cell::sync::Lazy, stores::TimedCache, Cached};
 use chrono::{NaiveDateTime, Utc};
-use diesel::prelude::*;
-use diesel::pg::data_types::PgInterval;
-use diesel::result::{Error, DatabaseErrorKind};
-use cached::stores::TimedCache;
-use cached::Cached;
-use cached::once_cell::sync::Lazy;
-use std::sync::Mutex;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use diesel::{
+    pg::data_types::PgInterval,
+    prelude::*,
+    result::{DatabaseErrorKind, Error},
+};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Mutex,
+};
 
-use crate::schema::messages;
-use crate::schema::queues;
-use crate::models::PgRepository;
+use crate::{
+    models::PgRepository,
+    schema::{messages, queues},
+};
 use std::ops::Deref;
 
 #[derive(Debug)]
 pub struct QueueInput<'a> {
-    pub name: &'a str,
-    pub max_receives: Option<i32>,
-    pub dead_letter_queue: Option<&'a str>,
-    pub retention_timeout: i64,
-    pub visibility_timeout: i64,
-    pub message_delay: i64,
+    pub name:                        &'a str,
+    pub max_receives:                Option<i32>,
+    pub dead_letter_queue:           Option<&'a str>,
+    pub retention_timeout:           i64,
+    pub visibility_timeout:          i64,
+    pub message_delay:               i64,
     pub content_based_deduplication: bool,
 }
 
 #[derive(Insertable)]
-#[table_name="queues"]
+#[table_name = "queues"]
 pub struct NewQueue<'a> {
-    pub name: &'a str,
-    pub max_receives: Option<i32>,
-    pub dead_letter_queue: Option<&'a str>,
-    pub retention_timeout: PgInterval,
-    pub visibility_timeout: PgInterval,
-    pub message_delay: PgInterval,
+    pub name:                        &'a str,
+    pub max_receives:                Option<i32>,
+    pub dead_letter_queue:           Option<&'a str>,
+    pub retention_timeout:           PgInterval,
+    pub visibility_timeout:          PgInterval,
+    pub message_delay:               PgInterval,
     pub content_based_deduplication: bool,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at:                  NaiveDateTime,
+    pub updated_at:                  NaiveDateTime,
 }
 
 #[derive(Queryable, Associations, Identifiable, Clone, Debug, PartialEq)]
 pub struct Queue {
-    pub id: i32,
-    pub name: String,
-    pub max_receives: Option<i32>,
-    pub dead_letter_queue: Option<String>,
-    pub retention_timeout: PgInterval,
-    pub visibility_timeout: PgInterval,
-    pub message_delay: PgInterval,
+    pub id:                          i32,
+    pub name:                        String,
+    pub max_receives:                Option<i32>,
+    pub dead_letter_queue:           Option<String>,
+    pub retention_timeout:           PgInterval,
+    pub visibility_timeout:          PgInterval,
+    pub message_delay:               PgInterval,
     pub content_based_deduplication: bool,
-    pub created_at: NaiveDateTime,
-    pub updated_at: NaiveDateTime,
+    pub created_at:                  NaiveDateTime,
+    pub updated_at:                  NaiveDateTime,
 }
 
 pub(crate) fn pg_interval(mut seconds: i64) -> PgInterval {
@@ -58,8 +61,8 @@ pub(crate) fn pg_interval(mut seconds: i64) -> PgInterval {
 
         return PgInterval {
             microseconds: -int.microseconds,
-            days: -int.days,
-            months: -int.months,
+            days:         -int.days,
+            months:       -int.months,
         };
     }
 
@@ -70,15 +73,15 @@ pub(crate) fn pg_interval(mut seconds: i64) -> PgInterval {
 
     PgInterval {
         microseconds: seconds * 1_000_000,
-        days: days as i32,
-        months: months as i32,
+        days:         days as i32,
+        months:       months as i32,
     }
 }
 
 pub struct QueueDescription {
-    pub queue: Queue,
-    pub messages: i64,
-    pub visible_messages: i64,
+    pub queue:              Queue,
+    pub messages:           i64,
+    pub visible_messages:   i64,
     pub oldest_message_age: i64,
 }
 
@@ -86,7 +89,7 @@ static CACHE_HITS: AtomicUsize = AtomicUsize::new(0);
 static CACHE_MISSES: AtomicUsize = AtomicUsize::new(0);
 static QUEUE_CACHE: Lazy<Mutex<TimedCache<String, Queue>>> = Lazy::new(|| Mutex::new(TimedCache::with_lifespan(10)));
 
-pub trait QueueSource {
+pub trait QueueSource: Send {
     fn find_by_name(&self, name: &str) -> QueryResult<Option<Queue>>;
     fn find_by_name_cached(&self, name: &str) -> QueryResult<Option<Queue>> {
         let key = name.to_string();
@@ -94,7 +97,10 @@ pub trait QueueSource {
             let res = Cached::cache_get(&mut *cache, &key);
             if let Some(cached_val) = res {
                 let cache_hits = CACHE_HITS.fetch_add(1, Ordering::Relaxed) + 1;
-                info!("Found queue of name {}, total {} cache hits", &cached_val.name, cache_hits);
+                info!(
+                    "Found queue of name {}, total {} cache hits",
+                    &cached_val.name, cache_hits
+                );
                 return Ok(Some(cached_val.clone()));
             }
         } else {
@@ -113,7 +119,7 @@ pub trait QueueSource {
                     error!("Failed to get queue cache lock");
                 }
                 Ok(Some(queue))
-            }
+            },
         }
     }
 }
@@ -141,18 +147,18 @@ impl QueueRepository for PgRepository {
         let now = Utc::now();
         let result = diesel::dsl::insert_into(queues::table)
             .values(NewQueue {
-                name: queue.name,
-                max_receives: queue.max_receives,
-                dead_letter_queue: match queue.dead_letter_queue {
+                name:                        queue.name,
+                max_receives:                queue.max_receives,
+                dead_letter_queue:           match queue.dead_letter_queue {
                     None => None,
                     Some(s) => Some(s),
                 },
-                retention_timeout: pg_interval(queue.retention_timeout),
-                visibility_timeout: pg_interval(queue.visibility_timeout),
-                message_delay: pg_interval(queue.message_delay),
+                retention_timeout:           pg_interval(queue.retention_timeout),
+                visibility_timeout:          pg_interval(queue.visibility_timeout),
+                message_delay:               pg_interval(queue.message_delay),
                 content_based_deduplication: queue.content_based_deduplication,
-                created_at: now.naive_utc(),
-                updated_at: now.naive_utc(),
+                created_at:                  now.naive_utc(),
+                updated_at:                  now.naive_utc(),
             })
             .returning(queues::all_columns)
             .get_result(self.conn.deref());
@@ -164,9 +170,7 @@ impl QueueRepository for PgRepository {
     }
 
     fn count_queues(&self) -> QueryResult<i64> {
-        queues::table
-            .count()
-            .get_result(self.conn.deref())
+        queues::table.count().get_result(self.conn.deref())
     }
 
     fn describe_queue(&self, name: &str) -> QueryResult<Option<QueueDescription>> {
@@ -179,7 +183,11 @@ impl QueueRepository for PgRepository {
                     .get_result(self.conn.deref())?;
                 let now = Utc::now();
                 let visible_messages = messages::table
-                    .filter(messages::queue.eq(&queue.name).and(messages::visible_since.le(now.naive_utc())))
+                    .filter(
+                        messages::queue
+                            .eq(&queue.name)
+                            .and(messages::visible_since.le(now.naive_utc())),
+                    )
                     .count()
                     .get_result(self.conn.deref())?;
                 let oldest_message: Option<NaiveDateTime> = messages::table
@@ -201,13 +209,12 @@ impl QueueRepository for PgRepository {
                         Some(created_at) => now.naive_utc().timestamp() - created_at.timestamp(),
                     },
                 }))
-            }
+            },
         }
     }
 
     fn list_queues(&self, offset: Option<i64>, limit: Option<i64>) -> QueryResult<Vec<Queue>> {
-        let query = queues::table
-            .order(queues::id.asc());
+        let query = queues::table.order(queues::id.asc());
 
         match offset {
             None => match limit {
@@ -269,16 +276,16 @@ mod test {
     impl QueueSource for QueueSourceImpl {
         fn find_by_name(&self, name: &str) -> QueryResult<Option<Queue>> {
             Ok(Some(Queue {
-                id: 1,
-                name: name.to_string(),
-                max_receives: None,
-                dead_letter_queue: None,
-                retention_timeout: pg_interval(30),
-                visibility_timeout: pg_interval(30),
-                message_delay: pg_interval(30),
+                id:                          1,
+                name:                        name.to_string(),
+                max_receives:                None,
+                dead_letter_queue:           None,
+                retention_timeout:           pg_interval(30),
+                visibility_timeout:          pg_interval(30),
+                message_delay:               pg_interval(30),
                 content_based_deduplication: false,
-                created_at: Utc::now().naive_utc(),
-                updated_at: Utc::now().naive_utc(),
+                created_at:                  Utc::now().naive_utc(),
+                updated_at:                  Utc::now().naive_utc(),
             }))
         }
     }

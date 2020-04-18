@@ -1,36 +1,64 @@
 #![feature(async_closure)]
 extern crate mqs;
 
-#[macro_use] extern crate log;
+#[macro_use]
+extern crate log;
 extern crate dotenv;
 
-use std::convert::Infallible;
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::io::Stdout;
-use std::ops::Deref;
-use dotenv::dotenv;
-use hyper::{Body, Request, Response, Server};
-use hyper::service::{make_service_fn, service_fn};
-use hyper::server::conn::AddrStream;
-use log::Level;
-use tokio::runtime::Builder;
 use cached::once_cell::sync::Lazy;
+use dotenv::dotenv;
+use hyper::{
+    server::conn::AddrStream,
+    service::{make_service_fn, service_fn},
+    Body,
+    Request,
+    Response,
+    Server,
+};
+use log::{Level, Log};
+use std::{convert::Infallible, io::Stdout, net::SocketAddr, ops::Deref, sync::Arc};
+use tokio::{runtime::Builder, time::delay_for};
 
-use mqs::logger::json::Logger;
-use mqs::router::Router;
-use mqs::router::handler::{handle, make_router};
-use mqs::connection::{init_pool, Pool, DbConn};
-use mqs::models::PgRepository;
+use mqs::{
+    connection::{init_pool, DbConn, Pool},
+    logger::json::Logger,
+    models::PgRepository,
+    router::{
+        handler::{handle, make_router},
+        Router,
+    },
+    routes::messages::Source,
+};
+use std::time::Duration;
 
 struct HandlerService {
-    pool: Pool,
-    router: Router<PgRepository>,
+    pool:   Arc<Pool>,
+    router: Router<(PgRepository, RepoSource)>,
+}
+
+struct RepoSource {
+    pool: Arc<Pool>,
+}
+
+impl RepoSource {
+    fn new(pool: Arc<Pool>) -> Self {
+        RepoSource { pool }
+    }
+}
+
+impl Source<PgRepository> for RepoSource {
+    fn get(&self) -> Option<PgRepository> {
+        let conn = self.pool.try_get()?;
+        Some(PgRepository::new(DbConn(conn)))
+    }
 }
 
 impl HandlerService {
-    fn new(pool: Pool, router: Router<PgRepository>) -> Self {
-        HandlerService { pool, router }
+    fn new(pool: Pool, router: Router<(PgRepository, RepoSource)>) -> Self {
+        HandlerService {
+            pool: Arc::new(pool),
+            router,
+        }
     }
 
     async fn handle(&self, req: Request<Body>) -> Result<Response<Body>, Infallible> {
@@ -39,7 +67,7 @@ impl HandlerService {
             None => None,
             Some(conn) => Some(PgRepository::new(conn)),
         };
-        handle(repo, &self.router, req).await
+        handle(repo, RepoSource::new(self.pool.clone()), &self.router, req).await
     }
 }
 
@@ -48,7 +76,8 @@ fn main() {
 
     static LOGGER: Lazy<Logger<Stdout>> = Lazy::new(|| Logger::new(Level::Info, std::io::stdout()));
     log::set_logger(LOGGER.deref())
-        .map(|()| log::set_max_level(LOGGER.level().to_level_filter())).unwrap();
+        .map(|()| log::set_max_level(LOGGER.level().to_level_filter()))
+        .unwrap();
 
     let (pool, pool_size) = init_pool();
     let mut rt = Builder::new()
@@ -57,6 +86,13 @@ fn main() {
         .core_threads(pool_size as usize)
         .build()
         .unwrap();
+
+    rt.spawn(async {
+        loop {
+            delay_for(Duration::from_secs(10)).await;
+            LOGGER.flush();
+        }
+    });
 
     rt.block_on(async {
         // Setup and configure server...
@@ -69,16 +105,12 @@ fn main() {
             async move {
                 Ok::<_, Infallible>(service_fn(move |req| {
                     let req_service = Arc::clone(&conn_service);
-                    async move {
-                        req_service.handle(req).await
-                    }
+                    async move { req_service.handle(req).await }
                 }))
             }
         });
 
-        let server = Server::bind(&addr)
-            .http1_keepalive(true)
-            .serve(make_service);
+        let server = Server::bind(&addr).http1_keepalive(true).serve(make_service);
 
         info!("Started server on {} with a pool of size {}", addr, pool_size);
 
@@ -86,5 +118,8 @@ fn main() {
         if let Err(e) = server.await {
             error!("server error: {}", e);
         }
+
+        info!("Shutting down server");
+        LOGGER.flush();
     })
 }

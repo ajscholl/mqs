@@ -1,14 +1,28 @@
-use hyper::{Client, Body, Request, Method, Response, HeaderMap};
-use hyper::client::HttpConnector;
-use hyper::body::{HttpBody, Buf};
-use hyper::header::{HeaderValue, HeaderName, CONNECTION, CONTENT_TYPE, CONTENT_ENCODING};
-use std::error::Error;
-use std::fmt::{Display, Formatter};
+use hyper::{
+    body::{Buf, HttpBody},
+    client::HttpConnector,
+    header::{HeaderName, HeaderValue, CONNECTION, CONTENT_ENCODING, CONTENT_TYPE},
+    Body,
+    Client,
+    HeaderMap,
+    Method,
+    Request,
+    Response,
+};
 use serde::Deserialize;
+use std::{
+    error::Error,
+    fmt::{Display, Formatter},
+};
 
-use crate::multipart;
-use crate::routes::queues::{QueuesResponse, QueueDescription, QueueConfig};
-use crate::routes::messages::DEFAULT_CONTENT_TYPE;
+use crate::{
+    multipart,
+    routes::{
+        messages::DEFAULT_CONTENT_TYPE,
+        queues::{QueueConfig, QueueDescription, QueuesResponse},
+    },
+    status::Status::ServiceUnavailable,
+};
 
 #[derive(Debug)]
 pub enum ClientError {
@@ -67,22 +81,22 @@ impl From<multipart::ParseError> for ClientError {
 
 pub struct Service {
     client: Client<HttpConnector>,
-    host: String,
+    host:   String,
 }
 
 #[derive(Debug)]
 pub struct MessageResponse {
-    pub message_id: String,
-    pub content_type: String,
+    pub message_id:       String,
+    pub content_type:     String,
     pub content_encoding: Option<String>,
-    pub content: Vec<u8>,
+    pub content:          Vec<u8>,
 }
 
 impl Service {
     pub fn new(host: &str) -> Service {
         Service {
             client: Client::new(),
-            host: host.to_string(),
+            host:   host.to_string(),
         }
     }
 
@@ -90,7 +104,8 @@ impl Service {
         let mut req = Request::new(body);
         *req.uri_mut() = uri.parse()?;
         *req.method_mut() = method;
-        req.headers_mut().insert(CONNECTION, HeaderValue::from_static("keep-alive"));
+        req.headers_mut()
+            .insert(CONNECTION, HeaderValue::from_static("keep-alive"));
         Ok(req)
     }
 
@@ -113,7 +128,12 @@ impl Service {
         Ok(result)
     }
 
-    async fn parse_response_maybe<'a, T: Deserialize<'a>>(mut response: Response<Body>, body: &'a mut Vec<u8>, success_status: u16, error_status: u16) -> Result<Option<T>, ClientError> {
+    async fn parse_response_maybe<'a, T: Deserialize<'a>>(
+        mut response: Response<Body>,
+        body: &'a mut Vec<u8>,
+        success_status: u16,
+        error_status: u16,
+    ) -> Result<Option<T>, ClientError> {
         let status = response.status().as_u16();
         if status == success_status {
             *body = Self::read_body(response.body_mut()).await?;
@@ -126,30 +146,61 @@ impl Service {
         }
     }
 
-    pub async fn create_queue(&self, queue_name: &str, config: &QueueConfig) -> Result<Option<QueueConfig>, ClientError> {
+    async fn request<E, F: Fn() -> Result<Request<Body>, E>>(&self, builder: F) -> Result<Response<Body>, ClientError>
+    where
+        ClientError: From<E>,
+    {
+        loop {
+            let res = self.client.request(builder()?).await?;
+            if res.status() != ServiceUnavailable.to_hyper() {
+                return Ok(res);
+            }
+        }
+    }
+
+    pub async fn create_queue(
+        &self,
+        queue_name: &str,
+        config: &QueueConfig,
+    ) -> Result<Option<QueueConfig>, ClientError> {
         let uri = format!("{}/queues/{}", &self.host, queue_name);
-        let message = serde_json::to_string(config)?;
-        let mut req = Self::new_request(Method::PUT, &uri, Body::from(message))?;
-        req.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        let response = self.client.request(req).await?;
+        let response = self
+            .request(|| {
+                let message = serde_json::to_string(config)?;
+                let mut req = Self::new_request(Method::PUT, &uri, Body::from(message))?;
+                req.headers_mut()
+                    .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                Ok::<_, ClientError>(req)
+            })
+            .await?;
         let mut body = Vec::new();
         Self::parse_response_maybe(response, &mut body, 201, 409).await
     }
 
-    pub async fn update_queue(&self, queue_name: &str, config: &QueueConfig) -> Result<Option<QueueConfig>, ClientError> {
+    pub async fn update_queue(
+        &self,
+        queue_name: &str,
+        config: &QueueConfig,
+    ) -> Result<Option<QueueConfig>, ClientError> {
         let uri = format!("{}/queues/{}", &self.host, queue_name);
-        let message = serde_json::to_string(config)?;
-        let mut req = Self::new_request(Method::POST, &uri, Body::from(message))?;
-        req.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        let response = self.client.request(req).await?;
+        let response = self
+            .request(|| {
+                let message = serde_json::to_string(config)?;
+                let mut req = Self::new_request(Method::POST, &uri, Body::from(message))?;
+                req.headers_mut()
+                    .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                Ok::<_, ClientError>(req)
+            })
+            .await?;
         let mut body = Vec::new();
         Self::parse_response_maybe(response, &mut body, 200, 404).await
     }
 
     pub async fn delete_queue(&self, queue_name: &str) -> Result<Option<QueueConfig>, ClientError> {
         let uri = format!("{}/queues/{}", &self.host, queue_name);
-        let req = Self::new_request(Method::DELETE, &uri, Body::default())?;
-        let response = self.client.request(req).await?;
+        let response = self
+            .request(|| Self::new_request(Method::DELETE, &uri, Body::default()))
+            .await?;
         let mut body = Vec::new();
         Self::parse_response_maybe(response, &mut body, 200, 404).await
     }
@@ -161,8 +212,9 @@ impl Service {
             (None, Some(limit)) => format!("{}/queues?limit={}", &self.host, limit),
             (None, None) => format!("{}/queues", &self.host),
         };
-        let req = Self::new_request(Method::GET, &uri, Body::default())?;
-        let mut response = self.client.request(req).await?;
+        let mut response = self
+            .request(|| Self::new_request(Method::GET, &uri, Body::default()))
+            .await?;
         match response.status().as_u16() {
             200 => {
                 let body = Self::read_body(response.body_mut()).await?;
@@ -175,27 +227,37 @@ impl Service {
 
     pub async fn describe_queue(&self, queue_name: &str) -> Result<Option<QueueDescription>, ClientError> {
         let uri = format!("{}/queues/{}", &self.host, queue_name);
-        let req = Self::new_request(Method::GET, &uri, Body::default())?;
-        let response = self.client.request(req).await?;
+        let response = self
+            .request(|| Self::new_request(Method::GET, &uri, Body::default()))
+            .await?;
         let mut body = Vec::new();
         Self::parse_response_maybe(response, &mut body, 200, 404).await
     }
 
-    pub async fn get_message(&self, queue_name: &str) -> Result<Option<MessageResponse>, ClientError> {
-        let mut messages = self.get_messages(queue_name, 1).await?;
+    pub async fn get_message(
+        &self,
+        queue_name: &str,
+        timeout: Option<u16>,
+    ) -> Result<Option<MessageResponse>, ClientError> {
+        let mut messages = self.get_messages(queue_name, 1, timeout).await?;
         Ok(messages.pop())
     }
 
-    fn parse_message<F: FnOnce() -> Result<Vec<u8>, ClientError>>(headers: &HeaderMap, get_body: F) -> Result<MessageResponse, ClientError> {
-        let message_id = headers.get("X-MQS-MESSAGE-ID").map_or_else(|| "", |h| {
-            h.to_str().unwrap_or("")
-        }).to_string();
-        let content_type = headers.get(CONTENT_TYPE).map_or_else(|| DEFAULT_CONTENT_TYPE, |h| {
-            h.to_str().unwrap_or(DEFAULT_CONTENT_TYPE)
-        }).to_string();
-        let content_encoding = headers.get(CONTENT_ENCODING).map_or_else(|| None, |h| {
-            h.to_str().map_or_else(|_| None, |s| Some(s.to_string()))
-        });
+    fn parse_message<F: FnOnce() -> Result<Vec<u8>, ClientError>>(
+        headers: &HeaderMap,
+        get_body: F,
+    ) -> Result<MessageResponse, ClientError> {
+        let message_id = headers
+            .get("X-MQS-MESSAGE-ID")
+            .map_or_else(|| "", |h| h.to_str().unwrap_or(""))
+            .to_string();
+        let content_type = headers
+            .get(CONTENT_TYPE)
+            .map_or_else(|| DEFAULT_CONTENT_TYPE, |h| h.to_str().unwrap_or(DEFAULT_CONTENT_TYPE))
+            .to_string();
+        let content_encoding = headers
+            .get(CONTENT_ENCODING)
+            .map_or_else(|| None, |h| h.to_str().map_or_else(|_| None, |s| Some(s.to_string())));
         let content = get_body()?;
         Ok(MessageResponse {
             message_id,
@@ -205,22 +267,40 @@ impl Service {
         })
     }
 
-    pub async fn get_messages(&self, queue_name: &str, limit: u16) -> Result<Vec<MessageResponse>, ClientError> {
+    pub async fn get_messages(
+        &self,
+        queue_name: &str,
+        limit: u16,
+        timeout: Option<u16>,
+    ) -> Result<Vec<MessageResponse>, ClientError> {
         if limit == 0 {
             return Ok(Vec::new());
         }
 
         let uri = format!("{}/messages/{}", &self.host, queue_name);
-        let mut req = Self::new_request(Method::GET, &uri, Body::default())?;
-        if let Ok(value) = HeaderValue::from_str(&format!("{}", limit)) {
-            req.headers_mut().insert(HeaderName::from_static("x-mqs-max-messages"), value);
-        }
-        let mut response = self.client.request(req).await?;
+        let mut response = self
+            .request(|| {
+                let mut req = Self::new_request(Method::GET, &uri, Body::default())?;
+                if let Ok(value) = HeaderValue::from_str(&format!("{}", limit)) {
+                    req.headers_mut()
+                        .insert(HeaderName::from_static("x-mqs-max-messages"), value);
+                }
+                if let Some(timeout) = timeout {
+                    if let Ok(value) = HeaderValue::from_str(&format!("{}", timeout)) {
+                        req.headers_mut()
+                            .insert(HeaderName::from_static("x-mqs-max-wait-time"), value);
+                    }
+                }
+                Ok::<_, ClientError>(req)
+            })
+            .await?;
         match response.status().as_u16() {
             200 => {
-                let content_type = response.headers().get(CONTENT_TYPE).map_or_else(|| DEFAULT_CONTENT_TYPE, |h| {
-                    h.to_str().unwrap_or(DEFAULT_CONTENT_TYPE)
-                }).to_string();
+                let content_type = response
+                    .headers()
+                    .get(CONTENT_TYPE)
+                    .map_or_else(|| DEFAULT_CONTENT_TYPE, |h| h.to_str().unwrap_or(DEFAULT_CONTENT_TYPE))
+                    .to_string();
                 let body = Self::read_body(response.body_mut()).await?;
                 if let Some(boundary) = multipart::is_multipart(&content_type) {
                     let chunks = multipart::parse(boundary.as_bytes(), body.as_slice())?;
@@ -239,18 +319,28 @@ impl Service {
         }
     }
 
-    pub async fn publish_message(&self, queue_name: &str, content_type: &str, content_encoding: Option<&str>, message: Vec<u8>) -> Result<bool, ClientError> {
+    pub async fn publish_message(
+        &self,
+        queue_name: &str,
+        content_type: &str,
+        content_encoding: Option<&str>,
+        message: Vec<u8>,
+    ) -> Result<bool, ClientError> {
         let uri = format!("{}/messages/{}", &self.host, queue_name);
-        let mut req = Self::new_request(Method::POST, &uri, Body::from(message))?;
-        if let Ok(content_type) = HeaderValue::from_str(content_type) {
-            req.headers_mut().insert(CONTENT_TYPE, content_type);
-        }
-        if let Some(content_encoding) = content_encoding {
-            if let Ok(content_encoding) = HeaderValue::from_str(content_encoding) {
-                req.headers_mut().insert(CONTENT_ENCODING, content_encoding);
-            }
-        }
-        let response = self.client.request(req).await?;
+        let response = self
+            .request(|| {
+                let mut req = Self::new_request(Method::POST, &uri, Body::from(message.clone()))?;
+                if let Ok(content_type) = HeaderValue::from_str(content_type) {
+                    req.headers_mut().insert(CONTENT_TYPE, content_type);
+                }
+                if let Some(content_encoding) = content_encoding {
+                    if let Ok(content_encoding) = HeaderValue::from_str(content_encoding) {
+                        req.headers_mut().insert(CONTENT_ENCODING, content_encoding);
+                    }
+                }
+                Ok::<_, ClientError>(req)
+            })
+            .await?;
         match response.status().as_u16() {
             200 => Ok(false),
             201 => Ok(true),
@@ -258,12 +348,23 @@ impl Service {
         }
     }
 
-    pub async fn publish_messages(&self, queue_name: &str, messages: &Vec<(HeaderMap, Vec<u8>)>) -> Result<bool, ClientError> {
+    pub async fn publish_messages(
+        &self,
+        queue_name: &str,
+        messages: &Vec<(HeaderMap, Vec<u8>)>,
+    ) -> Result<bool, ClientError> {
         let uri = format!("{}/messages/{}", &self.host, queue_name);
-        let (boundary, body) = multipart::encode(messages);
-        let mut req = Self::new_request(Method::POST, &uri, Body::from(body))?;
-        req.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_str(&format!("multipart/mixed; boundary={}", boundary))?);
-        let response = self.client.request(req).await?;
+        let response = self
+            .request(|| {
+                let (boundary, body) = multipart::encode(messages);
+                let mut req = Self::new_request(Method::POST, &uri, Body::from(body))?;
+                req.headers_mut().insert(
+                    CONTENT_TYPE,
+                    HeaderValue::from_str(&format!("multipart/mixed; boundary={}", boundary))?,
+                );
+                Ok::<_, ClientError>(req)
+            })
+            .await?;
         match response.status().as_u16() {
             200 => Ok(false),
             201 => Ok(true),
@@ -273,8 +374,9 @@ impl Service {
 
     pub async fn delete_message(&self, message_id: &str) -> Result<bool, ClientError> {
         let uri = format!("{}/messages/{}", &self.host, message_id);
-        let req = Self::new_request(Method::DELETE, &uri, Body::default())?;
-        let response = self.client.request(req).await?;
+        let response = self
+            .request(|| Self::new_request(Method::DELETE, &uri, Body::default()))
+            .await?;
         match response.status().as_u16() {
             200 => Ok(true),
             404 => Ok(false),
