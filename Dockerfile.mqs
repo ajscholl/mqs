@@ -3,7 +3,7 @@ FROM debian:stretch
 RUN ((groupadd -r www-data && useradd -r -g www-data www-data) || true) && \
     apt-get update && \
     apt-get upgrade -yy && \
-    apt-get install -yy libpq5 && \
+    apt-get install -yy libpq5 libsqlite3-0 libmariadbclient18 && \
     apt-get autoremove && \
     rm -rf /var/lib/apt/lists/* && \
     mkdir -p /var/lib/mqs && \
@@ -15,8 +15,10 @@ HEALTHCHECK --interval=30s --timeout=3s CMD ["docker-healthcheck"]
 
 WORKDIR /var/lib/mqs
 
-CMD ["/usr/local/bin/mqs"]
+CMD /usr/local/bin/diesel migration run && exec /usr/local/bin/mqs
 
+COPY ./bin/diesel /usr/local/bin/diesel
+COPY ./migrations ./migrations
 COPY ./bin/mqs /usr/local/bin/mqs
 
 USER www-data:www-data

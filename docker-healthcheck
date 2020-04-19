@@ -1,9 +1,12 @@
 #!/bin/sh
-set -eo pipefail
+
+set -e
 
 host="$(hostname --ip-address || echo '127.0.0.1')"
+# trim trailing spaces
+host="$(echo "$host" | tr -d '[:space:]')"
 
-if health="$(curl -fsSL "http://$host:8000/health")"; then
+if health="$(curl --fail --show-error --silent --location --max-time 3 "http://$host:7843/health")"; then
 	if [ "$health" = "green" ]; then
 		exit 0
 	fi

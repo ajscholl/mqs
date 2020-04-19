@@ -1,5 +1,17 @@
 # Mini Queue Service (mqs)
 
+mqs is a service able to receive, store and delete messages in one or multiple queues.
+
+Features:
+
+* [X] Delayed messages.
+* [X] Making messages invisible for a fixed duration after receiving a message.
+* [X] Message deduplication for all messages *currently* in a single queue (if configured).
+* [X] Sending messages to a different queue after too many receives.
+* [X] Long-polling until a message arrives.
+* [ ] Authentication and multi-user management.
+* [ ] Dashboard to view current server status and/or manage server.
+
 ## Setting up a server
 
 To get a quick basic setup running, we need to start a postgres server and then can launch our mqs server.
@@ -21,8 +33,6 @@ $ docker run \
 We now have a temporary database server running to which we can connect if needed.
 Keep in mind that all the data on this server will be deleted after the container is deleted.
 
-TODO: migrate database.
-
 Launch mqs:
 
 ```shell script
@@ -38,6 +48,7 @@ $ docker run --detach \
 
 This will start a new instance listening on port 7843 (default port, you currently can't change this) accepting requests
 up to 1MiB in size. Between 5 and 25 connections to the database will be kept open at all times.
+It will also already setup our database schema - mqs runs database migrations automatically on startup by default.
 
 **Keep in mind that there is no authentication at all in the current version of mqs, so you maybe don't want to expose
 the post mqs listens on to the internet!**
