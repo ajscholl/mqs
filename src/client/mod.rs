@@ -9,7 +9,7 @@ use hyper::{
     Request,
     Response,
 };
-use serde::Deserialize;
+use serde::Serialize;
 use std::{
     error::Error,
     fmt::{Display, Formatter},
@@ -23,6 +23,7 @@ use crate::{
     },
     status::Status::ServiceUnavailable,
 };
+use serde::de::DeserializeOwned;
 
 #[derive(Debug)]
 pub enum ClientError {
@@ -33,6 +34,7 @@ pub enum ClientError {
     InvalidHeaderValue(hyper::header::InvalidHeaderValue),
     MultipartParseError(multipart::ParseError),
     ServiceError(u16),
+    TooLargeResponse,
 }
 
 impl Display for ClientError {
@@ -80,8 +82,9 @@ impl From<multipart::ParseError> for ClientError {
 }
 
 pub struct Service {
-    client: Client<HttpConnector>,
-    host:   String,
+    client:        Client<HttpConnector>,
+    host:          String,
+    max_body_size: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -93,11 +96,19 @@ pub struct MessageResponse {
 }
 
 impl Service {
+    const DEFAULT_MAX_BODY_SIZE: usize = 5 * 1024 * 1024;
+
     pub fn new(host: &str) -> Service {
         Service {
-            client: Client::new(),
-            host:   host.to_string(),
+            client:        Client::new(),
+            host:          host.to_string(),
+            max_body_size: Some(Self::DEFAULT_MAX_BODY_SIZE),
         }
+    }
+
+    pub fn set_max_body_size(&mut self, max_body_size: Option<usize>) -> &mut Self {
+        self.max_body_size = max_body_size;
+        self
     }
 
     fn new_request(method: Method, uri: &str, body: Body) -> Result<Request<Body>, hyper::http::uri::InvalidUri> {
@@ -109,13 +120,18 @@ impl Service {
         Ok(req)
     }
 
-    pub async fn read_body(body: &mut Body) -> Result<Vec<u8>, hyper::error::Error> {
+    pub async fn read_body(body: &mut Body, max_size: Option<usize>) -> Result<Option<Vec<u8>>, hyper::error::Error> {
         let mut chunks = Vec::new();
         let mut total_length = 0;
 
         while let Some(chunk) = body.data().await {
             let bytes = chunk?;
             total_length += bytes.len();
+            if let Some(max_length) = max_size {
+                if total_length > max_length {
+                    return Ok(None);
+                }
+            }
             chunks.push(bytes);
         }
 
@@ -125,20 +141,23 @@ impl Service {
             result.extend_from_slice(chunk.bytes());
         }
 
-        Ok(result)
+        Ok(Some(result))
     }
 
-    async fn parse_response_maybe<'a, T: Deserialize<'a>>(
+    async fn parse_response_maybe<T: DeserializeOwned>(
+        &self,
         mut response: Response<Body>,
-        body: &'a mut Vec<u8>,
         success_status: u16,
         error_status: u16,
     ) -> Result<Option<T>, ClientError> {
         let status = response.status().as_u16();
         if status == success_status {
-            *body = Self::read_body(response.body_mut()).await?;
-            let value = serde_json::from_slice(body.as_slice())?;
-            Ok(Some(value))
+            if let Some(body) = Self::read_body(response.body_mut(), self.max_body_size).await? {
+                let value = serde_json::from_slice(body.as_slice())?;
+                Ok(Some(value))
+            } else {
+                Err(ClientError::TooLargeResponse)
+            }
         } else if status == error_status {
             Ok(None)
         } else {
@@ -158,23 +177,30 @@ impl Service {
         }
     }
 
+    async fn json_request<T: Serialize>(
+        &self,
+        method: Method,
+        uri: &str,
+        request: &T,
+    ) -> Result<Response<Body>, ClientError> {
+        self.request(|| {
+            let message = serde_json::to_string(request)?;
+            let mut req = Self::new_request(method.clone(), uri, Body::from(message))?;
+            req.headers_mut()
+                .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+            Ok::<_, ClientError>(req)
+        })
+        .await
+    }
+
     pub async fn create_queue(
         &self,
         queue_name: &str,
         config: &QueueConfig,
     ) -> Result<Option<QueueConfig>, ClientError> {
         let uri = format!("{}/queues/{}", &self.host, queue_name);
-        let response = self
-            .request(|| {
-                let message = serde_json::to_string(config)?;
-                let mut req = Self::new_request(Method::PUT, &uri, Body::from(message))?;
-                req.headers_mut()
-                    .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                Ok::<_, ClientError>(req)
-            })
-            .await?;
-        let mut body = Vec::new();
-        Self::parse_response_maybe(response, &mut body, 201, 409).await
+        let response = self.json_request(Method::PUT, &uri, config).await?;
+        self.parse_response_maybe(response, 201, 409).await
     }
 
     pub async fn update_queue(
@@ -183,17 +209,8 @@ impl Service {
         config: &QueueConfig,
     ) -> Result<Option<QueueConfig>, ClientError> {
         let uri = format!("{}/queues/{}", &self.host, queue_name);
-        let response = self
-            .request(|| {
-                let message = serde_json::to_string(config)?;
-                let mut req = Self::new_request(Method::POST, &uri, Body::from(message))?;
-                req.headers_mut()
-                    .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                Ok::<_, ClientError>(req)
-            })
-            .await?;
-        let mut body = Vec::new();
-        Self::parse_response_maybe(response, &mut body, 200, 404).await
+        let response = self.json_request(Method::POST, &uri, config).await?;
+        self.parse_response_maybe(response, 200, 404).await
     }
 
     pub async fn delete_queue(&self, queue_name: &str) -> Result<Option<QueueConfig>, ClientError> {
@@ -201,8 +218,7 @@ impl Service {
         let response = self
             .request(|| Self::new_request(Method::DELETE, &uri, Body::default()))
             .await?;
-        let mut body = Vec::new();
-        Self::parse_response_maybe(response, &mut body, 200, 404).await
+        self.parse_response_maybe(response, 200, 404).await
     }
 
     pub async fn get_queues(&self, offset: Option<usize>, limit: Option<usize>) -> Result<QueuesResponse, ClientError> {
@@ -217,9 +233,12 @@ impl Service {
             .await?;
         match response.status().as_u16() {
             200 => {
-                let body = Self::read_body(response.body_mut()).await?;
-                let value = serde_json::from_slice(body.as_slice())?;
-                Ok(value)
+                if let Some(body) = Self::read_body(response.body_mut(), self.max_body_size).await? {
+                    let value = serde_json::from_slice(body.as_slice())?;
+                    Ok(value)
+                } else {
+                    Err(ClientError::TooLargeResponse)
+                }
             },
             status => Err(ClientError::ServiceError(status)),
         }
@@ -230,8 +249,7 @@ impl Service {
         let response = self
             .request(|| Self::new_request(Method::GET, &uri, Body::default()))
             .await?;
-        let mut body = Vec::new();
-        Self::parse_response_maybe(response, &mut body, 200, 404).await
+        self.parse_response_maybe(response, 200, 404).await
     }
 
     pub async fn get_message(
@@ -301,17 +319,20 @@ impl Service {
                     .get(CONTENT_TYPE)
                     .map_or_else(|| DEFAULT_CONTENT_TYPE, |h| h.to_str().unwrap_or(DEFAULT_CONTENT_TYPE))
                     .to_string();
-                let body = Self::read_body(response.body_mut()).await?;
-                if let Some(boundary) = multipart::is_multipart(&content_type) {
-                    let chunks = multipart::parse(boundary.as_bytes(), body.as_slice())?;
-                    let mut messages = Vec::with_capacity(chunks.len());
-                    for (headers, message) in chunks {
-                        messages.push(Self::parse_message(&headers, || Ok(message.to_vec()))?);
+                if let Some(body) = Self::read_body(response.body_mut(), self.max_body_size).await? {
+                    if let Some(boundary) = multipart::is_multipart(&content_type) {
+                        let chunks = multipart::parse(boundary.as_bytes(), body.as_slice())?;
+                        let mut messages = Vec::with_capacity(chunks.len());
+                        for (headers, message) in chunks {
+                            messages.push(Self::parse_message(&headers, || Ok(message.to_vec()))?);
+                        }
+                        Ok(messages)
+                    } else {
+                        let message = Self::parse_message(response.headers(), || Ok(body))?;
+                        Ok(vec![message])
                     }
-                    Ok(messages)
                 } else {
-                    let message = Self::parse_message(response.headers(), || Ok(body))?;
-                    Ok(vec![message])
+                    Err(ClientError::TooLargeResponse)
                 }
             },
             204 => Ok(Vec::new()),

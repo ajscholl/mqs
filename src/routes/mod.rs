@@ -125,7 +125,7 @@ pub(crate) mod test {
     pub(crate) fn read_body(body: &mut Body) -> Vec<u8> {
         let mut rt = Builder::new().enable_all().basic_scheduler().build().unwrap();
 
-        rt.block_on(async { Service::read_body(body).await.unwrap() })
+        rt.block_on(async { Service::read_body(body, None).await.unwrap().unwrap() })
     }
 
     #[test]

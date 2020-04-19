@@ -72,6 +72,7 @@ pub async fn handle<T, S>(
     conn: Option<T>,
     source: S,
     router: &Router<(T, S)>,
+    max_message_size: usize,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Infallible> {
     let mut response = if let Some(conn) = conn {
@@ -79,9 +80,9 @@ pub async fn handle<T, S>(
         {
             if let Some(handler) = router.route(req.method(), segments) {
                 let body = if handler.needs_body() {
-                    Service::read_body(req.body_mut()).await
+                    Service::read_body(req.body_mut(), Some(max_message_size)).await
                 } else {
-                    Ok(Vec::new())
+                    Ok(Some(Vec::new()))
                 };
                 match body {
                     Err(err) => {
@@ -94,7 +95,17 @@ pub async fn handle<T, S>(
                         *response.status_mut() = Status::InternalServerError.to_hyper();
                         response
                     },
-                    Ok(body) => {
+                    Ok(None) => {
+                        warn!("Body was larger than max allowed size ({})", max_message_size);
+
+                        let mut response = Response::new(Body::from("{\"error\":\"Payload too large\"}"));
+                        response
+                            .headers_mut()
+                            .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                        *response.status_mut() = Status::PayloadTooLarge.to_hyper();
+                        response
+                    },
+                    Ok(Some(body)) => {
                         info!("Found handler for request {} {}", req.method(), req.uri().path());
 
                         handler.handle((conn, source), req, body).await

@@ -8,6 +8,7 @@ pub enum Status {
     BadRequest          = 400,
     NotFound            = 404,
     Conflict            = 409,
+    PayloadTooLarge     = 413,
     InternalServerError = 500,
     ServiceUnavailable  = 503,
 }
@@ -31,6 +32,7 @@ mod test {
             Status::BadRequest,
             Status::NotFound,
             Status::Conflict,
+            Status::PayloadTooLarge,
             Status::InternalServerError,
             Status::ServiceUnavailable,
         ];

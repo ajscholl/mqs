@@ -14,7 +14,6 @@ use crate::{
     wait::MESSAGE_WAIT_QUEUE,
 };
 
-const MAX_MESSAGE_SIZE: u64 = 1024 * 1024;
 pub const DEFAULT_CONTENT_TYPE: &'static str = "application/octet-stream";
 
 fn boundary_from_headers(headers: &HeaderMap<HeaderValue>) -> Option<String> {

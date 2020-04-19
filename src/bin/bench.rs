@@ -8,6 +8,7 @@ use hyper::{
     header::{HeaderValue, CONTENT_ENCODING, CONTENT_TYPE},
     HeaderMap,
 };
+use mqs::client::ClientError;
 use std::{
     env,
     error::Error,
@@ -53,6 +54,14 @@ fn main() -> Result<(), AnyError> {
         .unwrap();
 
     rt.block_on(async {
+        {
+            match get_service().set_max_body_size(Some(1)).get_queues(None, None).await {
+                Err(ClientError::TooLargeResponse) => {},
+                _ => {
+                    Err(StringError::new("request should have been aborted"))?;
+                },
+            }
+        }
         let s = get_service();
         let queue_count: usize = 10;
         let queues = s.get_queues(None, None).await?;

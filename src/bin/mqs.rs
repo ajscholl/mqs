@@ -16,7 +16,16 @@ use hyper::{
     Server,
 };
 use log::{Level, Log};
-use std::{convert::Infallible, io::Stdout, net::SocketAddr, ops::Deref, sync::Arc};
+use std::{
+    convert::Infallible,
+    env,
+    env::VarError,
+    io::Stdout,
+    net::SocketAddr,
+    ops::Deref,
+    sync::Arc,
+    time::Duration,
+};
 use tokio::{runtime::Builder, time::delay_for};
 
 use mqs::{
@@ -29,11 +38,11 @@ use mqs::{
     },
     routes::messages::Source,
 };
-use std::time::Duration;
 
 struct HandlerService {
-    pool:   Arc<Pool>,
-    router: Router<(PgRepository, RepoSource)>,
+    pool:             Arc<Pool>,
+    router:           Router<(PgRepository, RepoSource)>,
+    max_message_size: usize,
 }
 
 struct RepoSource {
@@ -54,10 +63,11 @@ impl Source<PgRepository> for RepoSource {
 }
 
 impl HandlerService {
-    fn new(pool: Pool, router: Router<(PgRepository, RepoSource)>) -> Self {
+    fn new(pool: Pool, router: Router<(PgRepository, RepoSource)>, max_message_size: usize) -> Self {
         HandlerService {
             pool: Arc::new(pool),
             router,
+            max_message_size,
         }
     }
 
@@ -67,7 +77,34 @@ impl HandlerService {
             None => None,
             Some(conn) => Some(PgRepository::new(conn)),
         };
-        handle(repo, RepoSource::new(self.pool.clone()), &self.router, req).await
+        handle(
+            repo,
+            RepoSource::new(self.pool.clone()),
+            &self.router,
+            self.max_message_size,
+            req,
+        )
+        .await
+    }
+}
+
+fn get_max_message_size() -> usize {
+    const DEFAULT_MAX_MESSAGE_SIZE: usize = 1024 * 1024;
+    match env::var("MAX_MESSAGE_SIZE") {
+        Err(VarError::NotPresent) => DEFAULT_MAX_MESSAGE_SIZE,
+        Err(VarError::NotUnicode(_)) => {
+            panic!("MAX_MESSAGE_SIZE has to be a valid unicode string (it should be a numeric string in fact)")
+        },
+        Ok(s) => match s.parse::<usize>() {
+            Err(err) => panic!("Failed to parse maximum message size '{}': {}", s, err),
+            Ok(n) => {
+                if n < 1024 {
+                    panic!("Maximum message size must be at least 1024, got {}", n)
+                } else {
+                    n
+                }
+            },
+        },
     }
 }
 
@@ -86,6 +123,7 @@ fn main() {
         .core_threads(pool_size as usize)
         .build()
         .unwrap();
+    let service = Arc::new(HandlerService::new(pool, make_router(), get_max_message_size()));
 
     rt.spawn(async {
         loop {
@@ -97,7 +135,6 @@ fn main() {
     rt.block_on(async {
         // Setup and configure server...
         let addr = SocketAddr::from(([0, 0, 0, 0], 7843));
-        let service = Arc::new(HandlerService::new(pool, make_router()));
         let make_service = make_service_fn(move |conn: &AddrStream| {
             let remote_addr = conn.remote_addr();
             info!("New connection from {}", remote_addr);
