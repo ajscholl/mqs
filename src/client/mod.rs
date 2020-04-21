@@ -35,6 +35,7 @@ pub enum ClientError {
     MultipartParseError(multipart::ParseError),
     ServiceError(u16),
     TooLargeResponse,
+    HealthCheckError,
 }
 
 impl Display for ClientError {
@@ -402,6 +403,28 @@ impl Service {
             200 => Ok(true),
             404 => Ok(false),
             status => Err(ClientError::ServiceError(status)),
+        }
+    }
+
+    pub async fn check_health(&self) -> Result<bool, ClientError> {
+        let uri = format!("{}/health", &self.host);
+        let mut response = self
+            .request(|| Self::new_request(Method::GET, &uri, Body::default()))
+            .await?;
+        let body = match response.status().as_u16() {
+            200 => Ok(Self::read_body(response.body_mut(), self.max_body_size).await?),
+            status => Err(ClientError::ServiceError(status)),
+        }?;
+        if let Some(body) = body {
+            if body.as_slice().eq("green".as_bytes()) {
+                Ok(true)
+            } else if body.as_slice().eq("red".as_bytes()) {
+                Ok(false)
+            } else {
+                Err(ClientError::HealthCheckError)
+            }
+        } else {
+            Err(ClientError::TooLargeResponse)
         }
     }
 }

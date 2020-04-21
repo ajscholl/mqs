@@ -41,6 +41,29 @@ services:
     depends_on:
     - mqs
 
+  wait-db:
+    image: ${CI_REGISTRY_IMAGE}/wait-db:${CI_COMMIT_REF_NAME}
+    mem_limit: 256m
+    mem_reservation: 256m
+    environment:
+      DATABASE_URL: postgres://root:6f55ceed83f286e23fbd1ae3323ab5704867a716e0bb6cb0c7d8e026805729b9@postgres/test
+      MAX_POOL_SIZE: 1
+    networks:
+      test: {}
+    depends_on:
+    - postgres
+
+  wait-http:
+    image: ${CI_REGISTRY_IMAGE}/wait-http:${CI_COMMIT_REF_NAME}
+    mem_limit: 256m
+    mem_reservation: 256m
+    environment:
+      MQS_SERVER: mqs
+    networks:
+      test: {}
+    depends_on:
+    - mqs
+
 networks:
   test:
     driver: bridge

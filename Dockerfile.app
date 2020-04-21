@@ -1,13 +1,15 @@
 FROM debian:stretch
 
+ARG app
+
 RUN apt-get update && \
     apt-get upgrade -yy && \
     apt-get install -yy libpq5 && \
     apt-get autoremove && \
     rm -rf /var/lib/apt/lists/* && \
-    mkdir -p /bench
+    mkdir -p /app
 
-WORKDIR /bench
-CMD ["/usr/local/bin/bench"]
+WORKDIR /app
+CMD ["/usr/local/bin/app"]
 
-COPY ./bin/bench /usr/local/bin/bench
+COPY ./bin/${app} /usr/local/bin/app

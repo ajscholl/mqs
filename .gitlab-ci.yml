@@ -7,11 +7,6 @@ stages:
 - image
 - benchmark
 
-before_script:
-  - env
-  - pwd
-  - ls -lah
-
 test:
   image: rust:1.34.0-stretch
   stage: compile
@@ -43,6 +38,8 @@ compile:
      - mkdir -p bin
      - cp target/release/mqs bin
      - cp target/release/bench bin
+     - cp target/release/wait-db bin
+     - cp target/release/wait-http bin
      - cargo install diesel_cli
      - cp "$CARGO_HOME/bin/diesel" bin
      - ls -lah bin
@@ -50,6 +47,8 @@ compile:
     paths:
     - bin/mqs
     - bin/bench
+    - bin/wait-db
+    - bin/wait-http
     - bin/diesel
     expire_in: 1 week
   cache:
@@ -62,7 +61,7 @@ compile:
   stage: image
   script:
     - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
-    - docker build --tag $IMAGE_NAME --file $DOCKERFILE .
+    - docker build --tag $IMAGE_NAME --file $DOCKERFILE --build-arg="app=$APPLICATION" .
     - docker push $IMAGE_NAME
   dependencies:
     - compile
@@ -71,13 +70,29 @@ mqs:image:
   extends: .template:image
   variables:
     IMAGE_NAME: $CI_REGISTRY_IMAGE/mqs:$CI_COMMIT_REF_NAME
-    DOCKERFILE: Dockerfile.mqs
+    APPLICATION: mqs
+    DOCKERFILE: Dockerfile.service
 
 bench:image:
   extends: .template:image
   variables:
     IMAGE_NAME: $CI_REGISTRY_IMAGE/bench:$CI_COMMIT_REF_NAME
-    DOCKERFILE: Dockerfile.bench
+    APPLICATION: bench
+    DOCKERFILE: Dockerfile.app
+
+wait-db:image:
+  extends: .template:image
+  variables:
+    IMAGE_NAME: $CI_REGISTRY_IMAGE/wait-db:$CI_COMMIT_REF_NAME
+    APPLICATION: wait-db
+    DOCKERFILE: Dockerfile.app
+
+wait-http:image:
+  extends: .template:image
+  variables:
+    IMAGE_NAME: $CI_REGISTRY_IMAGE/wait-http:$CI_COMMIT_REF_NAME
+    APPLICATION: wait-http
+    DOCKERFILE: Dockerfile.app
 
 benchmark:
   stage: benchmark
@@ -86,10 +101,10 @@ benchmark:
     - apk add docker-compose
     - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
     - docker-compose --project-name "mqs-benchmark-$CI_JOB_ID" up --detach postgres
-    - sleep 20
+    - docker-compose --project-name "mqs-benchmark-$CI_JOB_ID" up --exit-code-from wait-db wait-db
     - docker-compose --project-name "mqs-benchmark-$CI_JOB_ID" up --detach mqs
+    - docker-compose --project-name "mqs-benchmark-$CI_JOB_ID" up --exit-code-from wait-http wait-http
   after_script:
     - docker-compose --project-name "mqs-benchmark-$CI_JOB_ID" down
   script:
-    - sleep 10
     - docker-compose --project-name "mqs-benchmark-$CI_JOB_ID" up --exit-code-from bench bench

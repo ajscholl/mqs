@@ -1,23 +1,30 @@
 use diesel::pg::PgConnection;
-use r2d2;
+use r2d2::{self, Error};
 use r2d2_diesel::ConnectionManager;
 use std::{env, ops::Deref, time::Duration};
+
+use crate::logger::connection::ConnectionHandler;
 
 pub type Pool = r2d2::Pool<ConnectionManager<PgConnection>>;
 
 pub struct DbConn(pub r2d2::PooledConnection<ConnectionManager<PgConnection>>);
 
-pub fn init_pool() -> (Pool, u16) {
+pub fn init_pool_maybe() -> Result<(Pool, u16), Error> {
     let manager = ConnectionManager::<PgConnection>::new(database_url());
     let (min_size, max_size) = pool_size();
     let pool = Pool::builder()
         .min_idle(Some(min_size as u32))
         .max_size(max_size as u32)
         .connection_timeout(Duration::from_secs(1))
-        .build(manager)
-        .expect("Failed to initialize database pool");
+        .event_handler(Box::new(ConnectionHandler::new()))
+        .error_handler(Box::new(ConnectionHandler::new()))
+        .build(manager)?;
 
-    (pool, max_size)
+    Ok((pool, max_size))
+}
+
+pub fn init_pool() -> (Pool, u16) {
+    init_pool_maybe().expect("Failed to initialize database pool")
 }
 
 fn database_url() -> String {
