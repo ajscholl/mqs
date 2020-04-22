@@ -6,6 +6,7 @@ stages:
 - compile
 - image
 - benchmark
+- publish
 
 test:
   image: rust:1.34.0-stretch
@@ -108,3 +109,17 @@ benchmark:
     - docker-compose --project-name "mqs-benchmark-$CI_JOB_ID" down
   script:
     - docker-compose --project-name "mqs-benchmark-$CI_JOB_ID" up --exit-code-from bench bench
+
+publish:
+  stage: publish
+  before_script:
+    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+  script:
+    - docker pull "$CI_REGISTRY_IMAGE/mqs:$CI_COMMIT_REF_NAME"
+    - docker tag "$CI_REGISTRY_IMAGE/mqs:$CI_COMMIT_REF_NAME" "$DOCKERHUB_USER/mqs:$CI_COMMIT_TAG"
+    - docker tag "$CI_REGISTRY_IMAGE/mqs:$CI_COMMIT_REF_NAME" "$DOCKERHUB_USER/mqs:latest"
+    - docker login -u "$DOCKERHUB_USER" -p "$DOCKERHUB_PASSWORD"
+    - docker push "$DOCKERHUB_USER/mqs:$CI_COMMIT_TAG"
+    - docker push "$DOCKERHUB_USER/mqs:latest"
+  only:
+    - tags
