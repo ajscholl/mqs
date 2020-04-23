@@ -1,0 +1,17 @@
+[package]
+name = "mqs-client"
+version = "0.1.0"
+authors = ["Jonas Scholl <jonas.scholl@lingumatiker.de>"]
+edition = "2018"
+
+[dependencies.mqs-common]
+path = "../common"
+
+[dependencies.hyper]
+version = "0.13"
+
+[dependencies.serde]
+version = "1.0.104"
+
+[dependencies.serde_json]
+version = "1.0.44"

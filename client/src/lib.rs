@@ -1,5 +1,4 @@
 use hyper::{
-    body::{Buf, HttpBody},
     client::HttpConnector,
     header::{HeaderName, HeaderValue, CONNECTION, CONTENT_ENCODING, CONTENT_TYPE},
     Body,
@@ -9,21 +8,20 @@ use hyper::{
     Request,
     Response,
 };
-use serde::Serialize;
+use mqs_common::{
+    multipart,
+    read_body,
+    status::Status::ServiceUnavailable,
+    QueueConfig,
+    QueueDescriptionOutput,
+    QueuesResponse,
+    DEFAULT_CONTENT_TYPE,
+};
+use serde::{de::DeserializeOwned, Serialize};
 use std::{
     error::Error,
     fmt::{Display, Formatter},
 };
-
-use crate::{
-    multipart,
-    routes::{
-        messages::DEFAULT_CONTENT_TYPE,
-        queues::{QueueConfig, QueueDescription, QueuesResponse},
-    },
-    status::Status::ServiceUnavailable,
-};
-use serde::de::DeserializeOwned;
 
 #[derive(Debug)]
 pub enum ClientError {
@@ -121,30 +119,6 @@ impl Service {
         Ok(req)
     }
 
-    pub async fn read_body(body: &mut Body, max_size: Option<usize>) -> Result<Option<Vec<u8>>, hyper::error::Error> {
-        let mut chunks = Vec::new();
-        let mut total_length = 0;
-
-        while let Some(chunk) = body.data().await {
-            let bytes = chunk?;
-            total_length += bytes.len();
-            if let Some(max_length) = max_size {
-                if total_length > max_length {
-                    return Ok(None);
-                }
-            }
-            chunks.push(bytes);
-        }
-
-        let mut result = Vec::with_capacity(total_length);
-
-        for chunk in chunks {
-            result.extend_from_slice(chunk.bytes());
-        }
-
-        Ok(Some(result))
-    }
-
     async fn parse_response_maybe<T: DeserializeOwned>(
         &self,
         mut response: Response<Body>,
@@ -153,7 +127,7 @@ impl Service {
     ) -> Result<Option<T>, ClientError> {
         let status = response.status().as_u16();
         if status == success_status {
-            if let Some(body) = Self::read_body(response.body_mut(), self.max_body_size).await? {
+            if let Some(body) = read_body(response.body_mut(), self.max_body_size).await? {
                 let value = serde_json::from_slice(body.as_slice())?;
                 Ok(Some(value))
             } else {
@@ -234,7 +208,7 @@ impl Service {
             .await?;
         match response.status().as_u16() {
             200 => {
-                if let Some(body) = Self::read_body(response.body_mut(), self.max_body_size).await? {
+                if let Some(body) = read_body(response.body_mut(), self.max_body_size).await? {
                     let value = serde_json::from_slice(body.as_slice())?;
                     Ok(value)
                 } else {
@@ -245,7 +219,7 @@ impl Service {
         }
     }
 
-    pub async fn describe_queue(&self, queue_name: &str) -> Result<Option<QueueDescription>, ClientError> {
+    pub async fn describe_queue(&self, queue_name: &str) -> Result<Option<QueueDescriptionOutput>, ClientError> {
         let uri = format!("{}/queues/{}", &self.host, queue_name);
         let response = self
             .request(|| Self::new_request(Method::GET, &uri, Body::default()))
@@ -320,7 +294,7 @@ impl Service {
                     .get(CONTENT_TYPE)
                     .map_or_else(|| DEFAULT_CONTENT_TYPE, |h| h.to_str().unwrap_or(DEFAULT_CONTENT_TYPE))
                     .to_string();
-                if let Some(body) = Self::read_body(response.body_mut(), self.max_body_size).await? {
+                if let Some(body) = read_body(response.body_mut(), self.max_body_size).await? {
                     if let Some(boundary) = multipart::is_multipart(&content_type) {
                         let chunks = multipart::parse(boundary.as_bytes(), body.as_slice())?;
                         let mut messages = Vec::with_capacity(chunks.len());
@@ -412,7 +386,7 @@ impl Service {
             .request(|| Self::new_request(Method::GET, &uri, Body::default()))
             .await?;
         let body = match response.status().as_u16() {
-            200 => Ok(Self::read_body(response.body_mut(), self.max_body_size).await?),
+            200 => Ok(read_body(response.body_mut(), self.max_body_size).await?),
             status => Err(ClientError::ServiceError(status)),
         }?;
         if let Some(body) = body {

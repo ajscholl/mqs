@@ -1,25 +1,19 @@
-use hyper::{
-    header::{HeaderValue, CONNECTION, CONTENT_TYPE, SERVER},
-    Body,
-    Method,
-    Request,
-    Response,
-};
-use std::convert::Infallible;
+use hyper::Method;
+use mqs_common::router::{Router, WildcardRouter};
 
 use crate::{
-    client::Service,
     models::{health::HealthCheckRepository, message::MessageRepository, queue::QueueRepository},
     router::{
         health::HealthHandler,
         messages::{DeleteMessageHandler, PublishMessagesHandler, ReceiveMessagesHandler},
         queues::{CreateQueueHandler, DeleteQueueHandler, DescribeQueueHandler, ListQueuesHandler, UpdateQueueHandler},
-        Router,
-        WildcardRouter,
     },
     routes::messages::Source,
-    status::Status,
 };
+
+mod health;
+mod messages;
+mod queues;
 
 struct QueuesSubRouter;
 
@@ -68,96 +62,19 @@ pub fn make_router<R: QueueRepository + MessageRepository + HealthCheckRepositor
         .with_route("messages", Router::new().with_wildcard(MessagesSubRouter))
 }
 
-pub async fn handle<T, S>(
-    conn: Option<T>,
-    source: S,
-    router: &Router<(T, S)>,
-    max_message_size: usize,
-    mut req: Request<Body>,
-) -> Result<Response<Body>, Infallible> {
-    let mut response = if let Some(conn) = conn {
-        let segments = req.uri().path().split("/").into_iter();
-        {
-            if let Some(handler) = router.route(req.method(), segments) {
-                let body = if handler.needs_body() {
-                    Service::read_body(req.body_mut(), Some(max_message_size)).await
-                } else {
-                    Ok(Some(Vec::new()))
-                };
-                match body {
-                    Err(err) => {
-                        error!("Failed to read message body: {}", err);
-
-                        let mut response = Response::new(Body::from("{\"error\":\"Internal server error\"}"));
-                        response
-                            .headers_mut()
-                            .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                        *response.status_mut() = Status::InternalServerError.to_hyper();
-                        response
-                    },
-                    Ok(None) => {
-                        warn!("Body was larger than max allowed size ({})", max_message_size);
-
-                        let mut response = Response::new(Body::from("{\"error\":\"Payload too large\"}"));
-                        response
-                            .headers_mut()
-                            .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                        *response.status_mut() = Status::PayloadTooLarge.to_hyper();
-                        response
-                    },
-                    Ok(Some(body)) => {
-                        info!("Found handler for request {} {}", req.method(), req.uri().path());
-
-                        handler.handle((conn, source), req, body).await
-                    },
-                }
-            } else {
-                error!("No handler found for request {} {}", req.method(), req.uri().path());
-
-                let mut response = Response::new(Body::from("{\"error\":\"No handler found for request\"}"));
-                response
-                    .headers_mut()
-                    .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                *response.status_mut() = Status::NotFound.to_hyper();
-                response
-            }
-        }
-    } else {
-        error!(
-            "No database connection available for request {} {}",
-            req.method(),
-            req.uri().path()
-        );
-
-        let mut response = Response::new(Body::from("{\"error\":\"Service unavailable, try again later\"}"));
-        response
-            .headers_mut()
-            .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        *response.status_mut() = Status::ServiceUnavailable.to_hyper();
-        response
-    };
-    response.headers_mut().insert(SERVER, HeaderValue::from_static("mqs"));
-    // TODO: should we add this header every time or only when seeing it from the client / on HTTP/1.1?
-    response
-        .headers_mut()
-        .insert(CONNECTION, HeaderValue::from_static("keep-alive"));
-    Ok(response)
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{
-        models::{
-            queue::QueueInput,
-            test::{CloneSource, TestRepo},
-        },
-        router::Handler,
-        routes::test::read_body,
-        status::Status,
-        wait::test::make_runtime,
+    use crate::models::{
+        queue::QueueInput,
+        test::{CloneSource, TestRepo},
     };
-    use hyper::header::HeaderName;
+    use hyper::{header::HeaderName, Body, Request, Response};
+    use mqs_common::{
+        router::Handler,
+        status::Status,
+        test::{make_runtime, read_body},
+    };
     use std::sync::{Arc, Mutex};
 
     fn run_handler<R: Clone + Send>(handler: Arc<dyn Handler<(R, CloneSource<R>)>>, repo: &R) -> Response<Body> {

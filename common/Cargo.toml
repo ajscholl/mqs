@@ -1,0 +1,28 @@
+[package]
+name = "mqs-common"
+version = "0.1.0"
+authors = ["Jonas Scholl <jonas.scholl@lingumatiker.de>"]
+edition = "2018"
+
+[dependencies.async-trait]
+version = "0.1.26"
+
+[dependencies.hyper]
+version = "0.13"
+
+[dependencies.log]
+version = "0.4.8"
+
+[dependencies.serde]
+version = "1.0.104"
+
+[dependencies.serde_derive]
+version = "1.0.104"
+
+[dependencies.tokio]
+version = "0.2.13"
+features = ["full"]
+
+[dependencies.uuid]
+version = "0.6.5"
+features = ["serde", "v4"]

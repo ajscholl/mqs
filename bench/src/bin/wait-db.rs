@@ -1,16 +1,12 @@
-#![feature(async_closure)]
-extern crate mqs;
-
 #[macro_use]
 extern crate log;
-extern crate dotenv;
 
 use cached::once_cell::sync::Lazy;
 use dotenv::dotenv;
 use log::Level;
 use std::{io::Stdout, ops::Deref, thread::sleep, time::Duration};
 
-use mqs::{connection::init_pool_maybe, logger::json::Logger};
+use mqs_server::{connection::init_pool_maybe, logger::json::Logger};
 
 fn main() {
     dotenv().ok();

@@ -5,16 +5,19 @@ use diesel::{
     prelude::*,
     result::{DatabaseErrorKind, Error},
 };
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Mutex,
+use mqs_common::{QueueConfig, QueueConfigOutput, QueueRedrivePolicy};
+use std::{
+    ops::Deref,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Mutex,
+    },
 };
 
 use crate::{
     models::PgRepository,
     schema::{messages, queues},
 };
-use std::ops::Deref;
 
 #[derive(Debug)]
 pub struct QueueInput<'a> {
@@ -25,6 +28,26 @@ pub struct QueueInput<'a> {
     pub visibility_timeout:          i64,
     pub message_delay:               i64,
     pub content_based_deduplication: bool,
+}
+
+impl<'a> QueueInput<'a> {
+    pub(crate) fn new(config: &'a QueueConfig, queue_name: &'a str) -> Self {
+        QueueInput {
+            name:                        queue_name,
+            max_receives:                match &config.redrive_policy {
+                None => None,
+                Some(p) => Some(p.max_receives),
+            },
+            dead_letter_queue:           match &config.redrive_policy {
+                None => None,
+                Some(p) => Some(&p.dead_letter_queue),
+            },
+            retention_timeout:           config.retention_timeout,
+            visibility_timeout:          config.visibility_timeout,
+            message_delay:               config.message_delay,
+            content_based_deduplication: config.message_deduplication,
+        }
+    }
 }
 
 #[derive(Insertable)]
@@ -53,6 +76,29 @@ pub struct Queue {
     pub content_based_deduplication: bool,
     pub created_at:                  NaiveDateTime,
     pub updated_at:                  NaiveDateTime,
+}
+
+impl Queue {
+    pub(crate) fn into_config_output(self) -> QueueConfigOutput {
+        QueueConfigOutput {
+            name:                  self.name,
+            redrive_policy:        match (self.dead_letter_queue, self.max_receives) {
+                (Some(dead_letter_queue), Some(max_receives)) => Some(QueueRedrivePolicy {
+                    max_receives,
+                    dead_letter_queue,
+                }),
+                _ => None,
+            },
+            retention_timeout:     pg_interval_seconds(&self.retention_timeout),
+            visibility_timeout:    pg_interval_seconds(&self.visibility_timeout),
+            message_delay:         pg_interval_seconds(&self.message_delay),
+            message_deduplication: self.content_based_deduplication,
+        }
+    }
+}
+
+fn pg_interval_seconds(interval: &PgInterval) -> i64 {
+    interval.microseconds / 1000000 + interval.days as i64 * (24 * 3600) + interval.months as i64 * (30 * 24 * 3600)
 }
 
 pub(crate) fn pg_interval(mut seconds: i64) -> PgInterval {

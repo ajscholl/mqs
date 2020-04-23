@@ -1,7 +1,8 @@
 use async_trait::async_trait;
 use hyper::{Body, Request, Response};
+use mqs_common::router::Handler;
 
-use crate::{models::health::HealthCheckRepository, router::Handler};
+use crate::models::health::HealthCheckRepository;
 
 pub struct HealthHandler;
 

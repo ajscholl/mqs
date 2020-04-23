@@ -1,0 +1,63 @@
+[package]
+name = "mqs-server"
+version = "0.1.0"
+authors = ["Jonas Scholl <jonas.scholl@lingumatiker.de>"]
+edition = "2018"
+
+[dependencies.mqs-common]
+path = "../common"
+
+[dependencies.async-trait]
+version = "0.1.26"
+
+[dependencies.base64]
+version = "0.11.0"
+
+[dependencies.cached]
+version = "0.11.0"
+
+[dependencies.chrono]
+version = "0.4.10"
+features = ["serde"]
+
+[dependencies.diesel]
+version = "1.4.3"
+features = ["postgres", "chrono", "uuid"]
+
+[dependencies.dotenv]
+version = "0.15.0"
+
+[dependencies.hyper]
+version = "0.13"
+
+[dependencies.tokio]
+version = "0.2.13"
+features = ["full"]
+
+[dependencies.log]
+version = "0.4.8"
+
+[dependencies.r2d2]
+version = "0.8.8"
+
+[dependencies.r2d2-diesel]
+version = "1.0"
+
+[dependencies.sha2]
+version = "0.8.1"
+
+[dependencies.serde]
+version = "1.0.104"
+
+[dependencies.serde_derive]
+version = "1.0.104"
+
+[dependencies.serde_json]
+version = "1.0.44"
+
+[dependencies.time]
+version = "0.1.42"
+
+[dependencies.uuid]
+version = "0.6.5"
+features = ["serde", "v4"]

@@ -1,9 +1,7 @@
 #![feature(async_closure)]
-extern crate mqs;
 
 #[macro_use]
 extern crate log;
-extern crate dotenv;
 
 use cached::once_cell::sync::Lazy;
 use dotenv::dotenv;
@@ -28,14 +26,12 @@ use std::{
 };
 use tokio::{runtime::Builder, time::delay_for};
 
-use mqs::{
+use mqs_common::router::{handler::handle, Router};
+use mqs_server::{
     connection::{init_pool, DbConn, Pool},
     logger::json::Logger,
     models::PgRepository,
-    router::{
-        handler::{handle, make_router},
-        Router,
-    },
+    router::make_router,
     routes::messages::Source,
 };
 

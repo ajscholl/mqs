@@ -1,76 +1,12 @@
-use diesel::{pg::types::date_and_time::PgInterval, QueryResult};
+use diesel::QueryResult;
 use hyper::Body;
+use mqs_common::{status::Status, QueueConfig, QueuesResponse};
 use std::collections::HashMap;
 
 use crate::{
-    models::queue::{Queue, QueueInput, QueueRepository},
+    models::queue::{QueueInput, QueueRepository},
     routes::MqsResponse,
-    status::Status,
 };
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct QueueRedrivePolicy {
-    pub max_receives:      i32,
-    pub dead_letter_queue: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct QueueConfig {
-    pub redrive_policy:        Option<QueueRedrivePolicy>,
-    pub retention_timeout:     i64,
-    pub visibility_timeout:    i64,
-    pub message_delay:         i64,
-    pub message_deduplication: bool,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct QueueConfigOutput {
-    pub name:                  String,
-    pub redrive_policy:        Option<QueueRedrivePolicy>,
-    pub retention_timeout:     i64,
-    pub visibility_timeout:    i64,
-    pub message_delay:         i64,
-    pub message_deduplication: bool,
-}
-
-impl QueueConfigOutput {
-    fn new(queue: Queue) -> QueueConfigOutput {
-        QueueConfigOutput {
-            name:                  queue.name,
-            redrive_policy:        match (queue.dead_letter_queue, queue.max_receives) {
-                (Some(dead_letter_queue), Some(max_receives)) => Some(QueueRedrivePolicy {
-                    max_receives,
-                    dead_letter_queue,
-                }),
-                _ => None,
-            },
-            retention_timeout:     pg_interval_seconds(&queue.retention_timeout),
-            visibility_timeout:    pg_interval_seconds(&queue.visibility_timeout),
-            message_delay:         pg_interval_seconds(&queue.message_delay),
-            message_deduplication: queue.content_based_deduplication,
-        }
-    }
-}
-
-impl QueueConfig {
-    fn to_input<'a>(&'a self, queue_name: &'a str) -> QueueInput<'a> {
-        QueueInput {
-            name:                        queue_name,
-            max_receives:                match &self.redrive_policy {
-                None => None,
-                Some(p) => Some(p.max_receives),
-            },
-            dead_letter_queue:           match &self.redrive_policy {
-                None => None,
-                Some(p) => Some(&p.dead_letter_queue),
-            },
-            retention_timeout:           self.retention_timeout,
-            visibility_timeout:          self.visibility_timeout,
-            message_delay:               self.message_delay,
-            content_based_deduplication: self.message_deduplication,
-        }
-    }
-}
 
 pub fn new_queue<R: QueueRepository>(
     repo: R,
@@ -85,12 +21,12 @@ pub fn new_queue<R: QueueRepository>(
         },
         Ok(config) => {
             info!("Creating new queue {}", queue_name);
-            let created = repo.insert_queue(&config.to_input(queue_name));
+            let created = repo.insert_queue(&QueueInput::new(&config, queue_name));
 
             match created {
                 Ok(Some(queue)) => {
                     info!("Created new queue {}", queue_name);
-                    MqsResponse::status_json(Status::Created, &QueueConfigOutput::new(queue))
+                    MqsResponse::status_json(Status::Created, &queue.into_config_output())
                 },
                 Ok(None) => {
                     info!("Queue {} did already exist", queue_name);
@@ -118,12 +54,12 @@ pub fn update_queue<R: QueueRepository>(
         },
         Ok(config) => {
             info!("Updating queue {}", queue_name);
-            let result = repo.update_queue(&config.to_input(queue_name));
+            let result = repo.update_queue(&QueueInput::new(&config, queue_name));
 
             match result {
                 Ok(Some(queue)) => {
                     info!("Updated queue {}", queue_name);
-                    MqsResponse::json(&QueueConfigOutput::new(queue))
+                    MqsResponse::json(&queue.into_config_output())
                 },
                 Ok(None) => {
                     info!("Queue {} did not exist", queue_name);
@@ -144,7 +80,7 @@ pub fn delete_queue<R: QueueRepository>(repo: R, queue_name: &str) -> MqsRespons
     match deleted {
         Ok(Some(queue)) => {
             info!("Deleted queue {}", queue_name);
-            MqsResponse::json(&QueueConfigOutput::new(queue))
+            MqsResponse::json(&queue.into_config_output())
         },
         Ok(None) => {
             info!("Queue {} was not found", queue_name);
@@ -194,21 +130,11 @@ impl QueuesRange {
     }
 }
 
-fn pg_interval_seconds(interval: &PgInterval) -> i64 {
-    interval.microseconds / 1000000 + interval.days as i64 * (24 * 3600) + interval.months as i64 * (30 * 24 * 3600)
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct QueuesResponse {
-    pub queues: Vec<QueueConfigOutput>,
-    pub total:  i64,
-}
-
 fn list_queues_and_count<R: QueueRepository>(repo: R, range: &QueuesRange) -> QueryResult<QueuesResponse> {
     let queues = repo.list_queues(range.offset, range.limit)?;
     let total = repo.count_queues()?;
     Ok(QueuesResponse {
-        queues: queues.into_iter().map(|queue| QueueConfigOutput::new(queue)).collect(),
+        queues: queues.into_iter().map(|queue| queue.into_config_output()).collect(),
         total,
     })
 }
@@ -230,44 +156,6 @@ pub fn list_queues<R: QueueRepository>(repo: R, range: Result<QueuesRange, Strin
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct QueueStatus {
-    pub messages:           i64,
-    pub visible_messages:   i64,
-    pub oldest_message_age: i64,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct QueueDescription {
-    pub name:                  String,
-    pub redrive_policy:        Option<QueueRedrivePolicy>,
-    pub retention_timeout:     i64,
-    pub visibility_timeout:    i64,
-    pub message_delay:         i64,
-    pub message_deduplication: bool,
-    pub status:                QueueStatus,
-}
-
-impl QueueDescription {
-    fn new(queue: Queue, messages: i64, visible_messages: i64, oldest_message_age: i64) -> QueueDescription {
-        let queue_description = QueueConfigOutput::new(queue);
-
-        QueueDescription {
-            name:                  queue_description.name,
-            redrive_policy:        queue_description.redrive_policy,
-            retention_timeout:     queue_description.retention_timeout,
-            visibility_timeout:    queue_description.visibility_timeout,
-            message_delay:         queue_description.message_delay,
-            message_deduplication: queue_description.message_deduplication,
-            status:                QueueStatus {
-                messages,
-                visible_messages,
-                oldest_message_age,
-            },
-        }
-    }
-}
-
 pub fn describe_queue<R: QueueRepository>(repo: R, queue_name: &str) -> MqsResponse {
     match repo.describe_queue(queue_name) {
         Err(err) => {
@@ -275,8 +163,7 @@ pub fn describe_queue<R: QueueRepository>(repo: R, queue_name: &str) -> MqsRespo
             MqsResponse::status(Status::InternalServerError)
         },
         Ok(None) => MqsResponse::status(Status::NotFound),
-        Ok(Some(description)) => MqsResponse::json(&QueueDescription::new(
-            description.queue,
+        Ok(Some(description)) => MqsResponse::json(&description.queue.into_config_output().into_description(
             description.messages,
             description.visible_messages,
             description.oldest_message_age,

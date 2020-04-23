@@ -3,9 +3,6 @@ use hyper::{Body, Method, Request, Response};
 use std::{collections::hash_map::HashMap, sync::Arc};
 
 pub mod handler;
-mod health;
-mod messages;
-mod queues;
 
 #[async_trait]
 pub trait Handler<A>: Sync + Send {
@@ -94,7 +91,7 @@ impl<A> Router<A> {
 #[cfg(test)]
 pub(crate) mod test {
     use super::*;
-    use crate::wait::test::make_runtime;
+    use crate::test::make_runtime;
     use hyper::header::HeaderValue;
 
     struct SimpleHandler;

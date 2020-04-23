@@ -1,9 +1,9 @@
 use async_trait::async_trait;
 use hyper::{Body, Request, Response};
+use mqs_common::router::Handler;
 
 use crate::{
     models::{message::MessageRepository, queue::QueueRepository},
-    router::Handler,
     routes::messages::{delete_message, publish_messages, receive_messages, MaxWaitTime, MessageCount, Source},
 };
 

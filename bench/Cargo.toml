@@ -1,0 +1,34 @@
+[package]
+name = "mqs-bench"
+version = "0.1.0"
+authors = ["Jonas Scholl <jonas.scholl@lingumatiker.de>"]
+edition = "2018"
+
+[dependencies.mqs-common]
+path = "../common"
+
+[dependencies.mqs-client]
+path = "../client"
+
+[dependencies.mqs-server]
+path = "../server"
+
+[dependencies.cached]
+version = "0.11.0"
+
+[dependencies.chrono]
+version = "0.4.10"
+features = []
+
+[dependencies.dotenv]
+version = "0.15.0"
+
+[dependencies.hyper]
+version = "0.13"
+
+[dependencies.tokio]
+version = "0.2.13"
+features = ["full"]
+
+[dependencies.log]
+version = "0.4.8"

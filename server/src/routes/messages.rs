@@ -2,19 +2,16 @@ use hyper::{
     header::{HeaderValue, CONTENT_ENCODING, CONTENT_TYPE},
     HeaderMap,
 };
+use mqs_common::{multipart, status::Status, DEFAULT_CONTENT_TYPE};
 
 use crate::{
     models::{
         message::{MessageInput, MessageRepository},
         queue::QueueRepository,
     },
-    multipart,
     routes::MqsResponse,
-    status::Status,
     wait::MESSAGE_WAIT_QUEUE,
 };
-
-pub const DEFAULT_CONTENT_TYPE: &'static str = "application/octet-stream";
 
 fn boundary_from_headers(headers: &HeaderMap<HeaderValue>) -> Option<String> {
     let content_type_header = headers.get(CONTENT_TYPE)?;

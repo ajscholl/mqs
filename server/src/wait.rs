@@ -1,3 +1,4 @@
+use cached::once_cell::sync::Lazy;
 use std::{collections::HashMap, ops::DerefMut, time::Duration};
 use tokio::{
     sync::{oneshot, oneshot::Sender, Mutex},
@@ -6,7 +7,6 @@ use tokio::{
 use uuid::Uuid;
 
 use crate::models::queue::Queue;
-use cached::once_cell::sync::Lazy;
 
 type MessageWaitQueueMap = HashMap<String, HashMap<Uuid, Sender<()>>>;
 
@@ -128,11 +128,9 @@ pub(crate) mod test {
     use super::*;
     use crate::models::queue::pg_interval;
     use chrono::Utc;
+    use mqs_common::test::make_runtime;
     use std::time::Duration;
-    use tokio::{
-        runtime::{Builder, Runtime},
-        time::delay_for,
-    };
+    use tokio::time::delay_for;
 
     fn get_queue() -> Queue {
         Queue {
@@ -147,10 +145,6 @@ pub(crate) mod test {
             created_at:                  Utc::now().naive_utc(),
             updated_at:                  Utc::now().naive_utc(),
         }
-    }
-
-    pub(crate) fn make_runtime() -> Runtime {
-        Builder::new().enable_all().basic_scheduler().build().unwrap()
     }
 
     #[test]

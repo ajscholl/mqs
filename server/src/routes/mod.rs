@@ -3,9 +3,10 @@ use hyper::{
     Body,
     HeaderMap,
 };
+use mqs_common::{multipart, status::Status};
 use serde::Serialize;
 
-use crate::{models::message::Message, multipart, status::Status};
+use crate::models::message::Message;
 
 pub mod messages;
 pub mod queues;
@@ -118,15 +119,8 @@ impl MqsResponse {
 #[cfg(test)]
 pub(crate) mod test {
     use super::*;
-    use crate::client::Service;
     use chrono::Utc;
-    use tokio::runtime::Builder;
-
-    pub(crate) fn read_body(body: &mut Body) -> Vec<u8> {
-        let mut rt = Builder::new().enable_all().basic_scheduler().build().unwrap();
-
-        rt.block_on(async { Service::read_body(body, None).await.unwrap().unwrap() })
-    }
+    use mqs_common::test::read_body;
 
     #[test]
     fn status_response() {

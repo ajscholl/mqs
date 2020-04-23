@@ -1,5 +1,4 @@
 #![feature(async_closure)]
-extern crate mqs;
 
 #[macro_use]
 extern crate log;
@@ -9,9 +8,10 @@ use cached::once_cell::sync::Lazy;
 use dotenv::dotenv;
 use log::Level;
 use std::{env, io::Stdout, ops::Deref, thread::sleep, time::Duration};
-
-use mqs::{client::Service, logger::json::Logger};
 use tokio::runtime::Builder;
+
+use mqs_client::Service;
+use mqs_server::logger::json::Logger;
 
 fn get_service() -> Service {
     let host = env::var("MQS_SERVER").unwrap_or("localhost".to_string());
@@ -26,11 +26,7 @@ fn main() {
         .map(|()| log::set_max_level(LOGGER.level().to_level_filter()))
         .unwrap();
 
-    let mut rt = Builder::new()
-        .enable_all()
-        .threaded_scheduler()
-        .build()
-        .unwrap();
+    let mut rt = Builder::new().enable_all().threaded_scheduler().build().unwrap();
 
     rt.block_on(async {
         loop {

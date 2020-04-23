@@ -1,14 +1,8 @@
-extern crate chrono;
-extern crate hyper;
-
-use mqs::{client::Service, routes::queues::QueueConfig};
-
 use chrono::Utc;
 use hyper::{
     header::{HeaderValue, CONTENT_ENCODING, CONTENT_TYPE},
     HeaderMap,
 };
-use mqs::client::ClientError;
 use std::{
     env,
     error::Error,
@@ -16,6 +10,9 @@ use std::{
     ops::Sub,
 };
 use tokio::runtime::Builder;
+
+use mqs_client::{ClientError, Service};
+use mqs_common::QueueConfig;
 
 type AnyError = Box<dyn std::error::Error + Send + Sync>;
 
