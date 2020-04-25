@@ -1,10 +1,10 @@
 [workspace]
 
 members = [
-    "bench",
-    "client",
-    "common",
-    "server",
+    "mqs-bench",
+    "mqs-client",
+    "mqs-common",
+    "mqs-server",
 ]
 
 # Settings for optimal performance and longest build time

@@ -117,7 +117,7 @@ mod test {
                     level_num:   expected_messages[i].0 as i32,
                     target:      "mqs_server::logger::json::test",
                     module_path: Some("mqs_server::logger::json::test"),
-                    file:        Some("server/src/logger/json.rs"),
+                    file:        Some("mqs-server/src/logger/json.rs"),
                     line:        parsed.line,
                     message:     expected_messages[i].1.to_string(),
                 });

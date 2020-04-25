@@ -5,7 +5,7 @@ authors = ["Jonas Scholl <jonas.scholl@lingumatiker.de>"]
 edition = "2018"
 
 [dependencies.mqs-common]
-path = "../common"
+path = "../mqs-common"
 
 [dependencies.async-trait]
 version = "0.1.26"

@@ -5,13 +5,13 @@ authors = ["Jonas Scholl <jonas.scholl@lingumatiker.de>"]
 edition = "2018"
 
 [dependencies.mqs-common]
-path = "../common"
+path = "../mqs-common"
 
 [dependencies.mqs-client]
-path = "../client"
+path = "../mqs-client"
 
 [dependencies.mqs-server]
-path = "../server"
+path = "../mqs-server"
 
 [dependencies.cached]
 version = "0.12.0"

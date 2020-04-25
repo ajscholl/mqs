@@ -18,5 +18,5 @@ use_try_shorthand = true
 wrap_comments = true
 comment_width = 120
 ignore = [
-    "server/src/schema.rs",
+    "mqs-server/src/schema.rs",
 ]

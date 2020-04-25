@@ -1,6 +1,7 @@
 FROM debian:stretch
 
 ARG app
+ARG appDir
 
 RUN ((groupadd -r www-data && useradd -r -g www-data www-data) || true) && \
     apt-get update && \
@@ -20,7 +21,7 @@ WORKDIR /var/lib/app
 CMD /usr/local/bin/diesel migration run && exec /usr/local/bin/app
 
 COPY ./bin/diesel /usr/local/bin/diesel
-COPY ./server/migrations ./migrations
+COPY ./${appDir}/migrations ./migrations
 COPY ./bin/${app} /usr/local/bin/app
 
 USER www-data:www-data
