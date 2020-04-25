@@ -172,7 +172,7 @@ pub(crate) mod test {
     fn mk_message(index: u8, encoding: Option<String>) -> Message {
         let now = Utc::now();
         Message {
-            id:               uuid::Uuid::from_uuid_bytes([
+            id:               uuid::Uuid::from_bytes([
                 10 + index,
                 20,
                 30,

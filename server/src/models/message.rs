@@ -1,4 +1,4 @@
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, Duration, NaiveDateTime, Utc};
 use diesel::{
     backend::Backend,
     pg::{types::date_and_time::PgInterval, Pg},
@@ -8,7 +8,6 @@ use diesel::{
 };
 use sha2::{digest::Input, Digest, Sha256};
 use std::ops::{Add, Deref};
-use time::Duration;
 use uuid::Uuid;
 
 use crate::{

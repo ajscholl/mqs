@@ -11,18 +11,18 @@ path = "../common"
 version = "0.1.26"
 
 [dependencies.base64]
-version = "0.11.0"
+version = "0.12.0"
 
 [dependencies.cached]
-version = "0.11.0"
+version = "0.12.0"
 
 [dependencies.chrono]
 version = "0.4.10"
 features = ["serde"]
 
 [dependencies.diesel]
-version = "1.4.3"
-features = ["postgres", "chrono", "uuid"]
+version = "1.4.4"
+features = ["postgres", "chrono", "uuidv07"]
 
 [dependencies.dotenv]
 version = "0.15.0"
@@ -47,17 +47,14 @@ version = "1.0"
 version = "0.8.1"
 
 [dependencies.serde]
-version = "1.0.104"
+version = "1.0.106"
 
 [dependencies.serde_derive]
-version = "1.0.104"
+version = "1.0.106"
 
 [dependencies.serde_json]
 version = "1.0.44"
 
-[dependencies.time]
-version = "0.1.42"
-
 [dependencies.uuid]
-version = "0.6.5"
+version = "0.8.1"
 features = ["serde", "v4"]

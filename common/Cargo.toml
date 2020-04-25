@@ -14,15 +14,15 @@ version = "0.13"
 version = "0.4.8"
 
 [dependencies.serde]
-version = "1.0.104"
+version = "1.0.106"
 
 [dependencies.serde_derive]
-version = "1.0.104"
+version = "1.0.106"
 
 [dependencies.tokio]
 version = "0.2.13"
 features = ["full"]
 
 [dependencies.uuid]
-version = "0.6.5"
+version = "0.8.1"
 features = ["serde", "v4"]
