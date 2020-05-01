@@ -2,17 +2,34 @@
 extern crate log;
 #[macro_use]
 extern crate serde_derive;
+#[macro_use]
+extern crate tokio;
 
 use hyper::{
     body::{Buf, HttpBody},
+    header::HeaderName,
     Body,
 };
 
+pub mod logger;
 pub mod multipart;
 pub mod router;
 pub mod status;
 
 pub const DEFAULT_CONTENT_TYPE: &'static str = "application/octet-stream";
+pub const TRACE_ID_HEADER: TraceIdHeader = TraceIdHeader {};
+
+pub struct TraceIdHeader {}
+
+impl TraceIdHeader {
+    pub fn name(&self) -> HeaderName {
+        HeaderName::from_static("x-trace-id")
+    }
+
+    pub fn upper(&self) -> String {
+        self.name().as_str().to_uppercase()
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct QueueConfig {

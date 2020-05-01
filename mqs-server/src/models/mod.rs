@@ -149,6 +149,7 @@ pub(crate) mod test {
                 receives: 0,
                 visible_since: add_pg_interval(&now, &queue.message_delay).naive_utc(),
                 created_at: now.naive_utc(),
+                trace_id: None,
             };
             self.messages_mut()?.insert(message.id.clone(), message);
 

@@ -6,6 +6,8 @@ use std::{
     sync::Mutex,
 };
 
+use crate::logger::trace_id::get_trace_id;
+
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 struct LogMessage<'a> {
     timestamp:   DateTime<Utc>,
@@ -15,6 +17,7 @@ struct LogMessage<'a> {
     module_path: Option<&'a str>,
     file:        Option<&'a str>,
     line:        Option<u32>,
+    trace_id:    Option<String>,
     message:     String,
 }
 
@@ -28,6 +31,7 @@ impl<'a> LogMessage<'a> {
             module_path: record.module_path(),
             file:        record.file(),
             line:        record.line(),
+            trace_id:    get_trace_id().map(|id| id.to_string()),
             message:     format!("{:?}", record.args()),
         }
     }
@@ -115,10 +119,11 @@ mod test {
                     timestamp:   start_time.clone(),
                     level:       expected_messages[i].0.to_string(),
                     level_num:   expected_messages[i].0 as i32,
-                    target:      "mqs_server::logger::json::test",
-                    module_path: Some("mqs_server::logger::json::test"),
-                    file:        Some("mqs-server/src/logger/json.rs"),
+                    target:      "mqs_common::logger::json::test",
+                    module_path: Some("mqs_common::logger::json::test"),
+                    file:        Some("mqs-common/src/logger/json.rs"),
                     line:        parsed.line,
+                    trace_id:    None,
                     message:     expected_messages[i].1.to_string(),
                 });
             }

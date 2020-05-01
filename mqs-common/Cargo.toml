@@ -7,6 +7,10 @@ edition = "2018"
 [dependencies.async-trait]
 version = "0.1.26"
 
+[dependencies.chrono]
+version = "0.4.10"
+features = ["serde"]
+
 [dependencies.hyper]
 version = "0.13"
 
@@ -19,9 +23,12 @@ version = "1.0.106"
 [dependencies.serde_derive]
 version = "1.0.106"
 
+[dependencies.serde_json]
+version = "1.0.44"
+
 [dependencies.tokio]
 version = "0.2.13"
-features = ["full"]
+features = ["rt-core", "rt-threaded", "rt-util", "sync", "blocking", "tcp", "time"]
 
 [dependencies.uuid]
 version = "0.8.1"

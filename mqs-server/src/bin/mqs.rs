@@ -24,10 +24,15 @@ use std::{
 };
 use tokio::{runtime::Builder, time::delay_for};
 
-use mqs_common::router::{handler::handle, Router};
+use mqs_common::{
+    logger::{
+        json::Logger,
+        trace_id::{create_trace_id, with_trace_id},
+    },
+    router::{handler::handle, Router},
+};
 use mqs_server::{
     connection::{init_pool, DbConn, Pool},
-    logger::json::Logger,
     models::PgRepository,
     router::make_router,
     routes::messages::Source,
@@ -136,7 +141,8 @@ fn main() {
             async move {
                 Ok::<_, Infallible>(service_fn(move |req| {
                     let req_service = Arc::clone(&conn_service);
-                    async move { req_service.handle(req).await }
+                    let id = create_trace_id(&req);
+                    async move { with_trace_id(id, req_service.handle(req)).await }
                 }))
             }
         });

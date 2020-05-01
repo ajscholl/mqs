@@ -6,7 +6,8 @@ use dotenv::dotenv;
 use log::Level;
 use std::{io::Stdout, ops::Deref, thread::sleep, time::Duration};
 
-use mqs_server::{connection::init_pool_maybe, logger::json::Logger};
+use mqs_common::logger::json::Logger;
+use mqs_server::connection::init_pool_maybe;
 
 fn main() {
     dotenv().ok();

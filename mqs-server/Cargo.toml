@@ -32,7 +32,7 @@ version = "0.13"
 
 [dependencies.tokio]
 version = "0.2.13"
-features = ["full"]
+features = ["rt-core", "rt-threaded", "rt-util", "sync", "blocking", "tcp", "time"]
 
 [dependencies.log]
 version = "0.4.8"

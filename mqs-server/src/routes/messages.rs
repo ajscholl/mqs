@@ -2,7 +2,8 @@ use hyper::{
     header::{HeaderValue, CONTENT_ENCODING, CONTENT_TYPE},
     HeaderMap,
 };
-use mqs_common::{multipart, status::Status, DEFAULT_CONTENT_TYPE};
+use mqs_common::{multipart, status::Status, DEFAULT_CONTENT_TYPE, TRACE_ID_HEADER};
+use uuid::Uuid;
 
 use crate::{
     models::{
@@ -54,13 +55,17 @@ pub async fn publish_messages<R: QueueRepository + MessageRepository>(
     for (message_headers, message_payload) in messages {
         info!("Inserting new message into queue {}", &queue_name);
         match repo.insert_message(&queue, &MessageInput {
+            payload:          message_payload,
             content_type:     message_headers
                 .get(CONTENT_TYPE)
                 .map_or_else(|| DEFAULT_CONTENT_TYPE, |v| v.to_str().unwrap_or(DEFAULT_CONTENT_TYPE)),
             content_encoding: message_headers
                 .get(CONTENT_ENCODING)
                 .map_or_else(|| None, |v| v.to_str().map_or_else(|_| None, |s| Some(s))),
-            payload:          message_payload,
+            trace_id:         message_headers
+                .get(TRACE_ID_HEADER.name())
+                .map_or_else(|| None, |v| v.to_str().map_or_else(|_| None, |s| Some(s)))
+                .map_or_else(|| None, |s| Uuid::parse_str(s).map_or_else(|_| None, |id| Some(id))),
         }) {
             Err(err) => {
                 error!("Failed to insert new message into queue {}: {}", &queue_name, err);
@@ -156,7 +161,7 @@ pub async fn receive_messages<R: QueueRepository + MessageRepository, S: Source<
 }
 
 pub fn delete_message<R: MessageRepository>(repo: R, message_id: &str) -> MqsResponse {
-    match uuid::Uuid::parse_str(message_id) {
+    match Uuid::parse_str(message_id) {
         Err(_) => MqsResponse::error_static("Message ID needs to be a UUID"),
         Ok(id) => {
             info!("Deleting message {}", id);

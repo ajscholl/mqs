@@ -3,7 +3,7 @@ use hyper::{
     Body,
     HeaderMap,
 };
-use mqs_common::{multipart, status::Status};
+use mqs_common::{multipart, status::Status, TRACE_ID_HEADER};
 use serde::Serialize;
 
 use crate::models::message::Message;
@@ -80,15 +80,12 @@ impl MqsResponse {
                     return res;
                 }
 
-                let message_parts = messages
-                    .into_iter()
-                    .map(|message| {
-                        let mut headers = HeaderMap::new();
-                        Self::add_message_headers(&mut headers, &message);
-                        (headers, message.payload)
-                    })
-                    .collect();
-                let (boundary, body) = multipart::encode(&message_parts);
+                let message_parts = messages.into_iter().map(|message| {
+                    let mut headers = HeaderMap::new();
+                    Self::add_message_headers(&mut headers, &message);
+                    (headers, message.payload)
+                });
+                let (boundary, body) = multipart::encode(message_parts);
 
                 let mut res = hyper::Response::new(Body::from(body));
                 *res.status_mut() = status.to_hyper();
@@ -108,6 +105,11 @@ impl MqsResponse {
         if let Some(content_encoding) = &message.content_encoding {
             if let Ok(value) = HeaderValue::from_str(content_encoding) {
                 headers.insert(CONTENT_ENCODING, value);
+            }
+        }
+        if let Some(trace_id) = message.trace_id {
+            if let Ok(value) = HeaderValue::from_str(&trace_id.to_string()) {
+                headers.insert(TRACE_ID_HEADER.name(), value);
             }
         }
         if let Ok(value) = HeaderValue::from_str(&message.id.to_string()) {
@@ -198,6 +200,7 @@ pub(crate) mod test {
             receives:         0,
             visible_since:    now.naive_utc(),
             created_at:       now.naive_utc(),
+            trace_id:         None,
         }
     }
 

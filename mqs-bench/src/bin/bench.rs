@@ -1,8 +1,4 @@
 use chrono::Utc;
-use hyper::{
-    header::{HeaderValue, CONTENT_ENCODING, CONTENT_TYPE},
-    HeaderMap,
-};
 use std::{
     env,
     error::Error,
@@ -10,8 +6,9 @@ use std::{
     ops::Sub,
 };
 use tokio::runtime::Builder;
+use uuid::Uuid;
 
-use mqs_client::{ClientError, Service};
+use mqs_client::{ClientError, PublishableMessage, Service};
 use mqs_common::QueueConfig;
 
 type AnyError = Box<dyn std::error::Error + Send + Sync>;
@@ -52,7 +49,11 @@ fn main() -> Result<(), AnyError> {
 
     rt.block_on(async {
         {
-            match get_service().set_max_body_size(Some(1)).get_queues(None, None).await {
+            match get_service()
+                .set_max_body_size(Some(1))
+                .get_queues(None, None, None)
+                .await
+            {
                 Err(ClientError::TooLargeResponse) => {},
                 _ => {
                     Err(StringError::new("request should have been aborted"))?;
@@ -61,10 +62,10 @@ fn main() -> Result<(), AnyError> {
         }
         let s = get_service();
         let queue_count: usize = 10;
-        let queues = s.get_queues(None, None).await?;
+        let queues = s.get_queues(None, None, None).await?;
         // clear data
         for queue in queues.queues {
-            let result = s.delete_queue(&queue.name).await?;
+            let result = s.delete_queue(None, &queue.name).await?;
 
             if result.is_none() {
                 Err(StringError::new("Failed to delete queue"))?;
@@ -74,7 +75,7 @@ fn main() -> Result<(), AnyError> {
         // create some test queues
         for i in 0..queue_count {
             let result = s
-                .create_queue(&format!("test-queue-{}", i), &QueueConfig {
+                .create_queue(&format!("test-queue-{}", i), None, &QueueConfig {
                     redrive_policy:        None,
                     retention_timeout:     3600,
                     visibility_timeout:    100,
@@ -91,7 +92,7 @@ fn main() -> Result<(), AnyError> {
         // update test queues
         for i in 0..queue_count {
             let result = s
-                .update_queue(&format!("test-queue-{}", i), &QueueConfig {
+                .update_queue(&format!("test-queue-{}", i), None, &QueueConfig {
                     redrive_policy:        None,
                     retention_timeout:     3600,
                     visibility_timeout:    300,
@@ -117,7 +118,7 @@ fn main() -> Result<(), AnyError> {
 
         for (queue, work) in pending {
             work.await?;
-            let info = s.describe_queue(&queue).await?;
+            let info = s.describe_queue(None, &queue).await?;
             if let Some(description) = info {
                 if description.status.messages != 10000 {
                     Err(StringError::new("Wrong number of messages found"))?;
@@ -176,7 +177,7 @@ fn main() -> Result<(), AnyError> {
 }
 
 async fn check_queue_empty(s: &Service, queue: &str) -> Result<(), AnyError> {
-    let info = s.describe_queue(queue).await?;
+    let info = s.describe_queue(None, queue).await?;
     if let Some(description) = info {
         if description.status.messages != 0 {
             Err(StringError::new("Queue not yet empty"))?
@@ -193,23 +194,25 @@ const DEFAULT_MESSAGE: [&'static [u8]; 3] = [
     &[6, 3, 6, 8, 0, 0, 0, 1, 5, 22, 254, 0, 32, 100, 128, 0],
     &[1, 2, 5, 3, 7, 4, 98, 66, 127, 0, 255, 192],
 ];
+const DEFAULT_TRACE_ID: [Option<Uuid>; 3] = [
+    Some(Uuid::NAMESPACE_DNS), // some (not so) random uuid
+    Some(Uuid::NAMESPACE_URL),
+    None,
+];
 const DEFAULT_MESSAGE_CONTENT_TYPE: [&'static str; 3] = ["application/json", "text/html", "image/png"];
 const DEFAULT_MESSAGE_CONTENT_ENCODING: [Option<&'static str>; 3] = [Some("identity"), Some("gzip"), None];
 
 async fn publish_messages(index: usize, queue: String) -> Result<(), AnyError> {
     let s = get_service();
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        CONTENT_TYPE,
-        HeaderValue::from_static(DEFAULT_MESSAGE_CONTENT_TYPE[index % DEFAULT_MESSAGE_CONTENT_TYPE.len()]),
-    );
-    if let Some(value) = DEFAULT_MESSAGE_CONTENT_ENCODING[index % DEFAULT_MESSAGE_CONTENT_ENCODING.len()] {
-        headers.insert(CONTENT_ENCODING, HeaderValue::from_static(value));
-    }
     let message = DEFAULT_MESSAGE[index % DEFAULT_MESSAGE.len()].to_owned();
     let mut message_bundle = Vec::with_capacity(if index > 5 { 10 } else { 1 });
     for _ in 0..message_bundle.capacity() {
-        message_bundle.push((headers.clone(), message.clone()));
+        message_bundle.push(PublishableMessage {
+            content_type:     DEFAULT_MESSAGE_CONTENT_TYPE[index % DEFAULT_MESSAGE_CONTENT_TYPE.len()],
+            content_encoding: DEFAULT_MESSAGE_CONTENT_ENCODING[index % DEFAULT_MESSAGE_CONTENT_ENCODING.len()],
+            trace_id:         DEFAULT_TRACE_ID[index % DEFAULT_TRACE_ID.len()],
+            message:          message.clone(),
+        });
     }
     for _ in 0..10000 / message_bundle.len() {
         let result = s.publish_messages(&queue, &message_bundle).await?;
@@ -252,10 +255,13 @@ async fn consume_messages(index: usize, queue: String, timeout: Option<u16>) -> 
                             }
                         },
                     }
+                    if message.trace_id != DEFAULT_TRACE_ID[index % DEFAULT_TRACE_ID.len()] {
+                        Err(StringError::new("Message trace id does not match"))?;
+                    }
                     if message.content.as_slice() != DEFAULT_MESSAGE[index % DEFAULT_MESSAGE.len()] {
                         Err(StringError::new("Message content does not match"))?;
                     }
-                    let deleted = s.delete_message(&message.message_id).await?;
+                    let deleted = s.delete_message(None, &message.message_id).await?;
 
                     if !deleted {
                         Err(StringError::new("Failed to delete message"))?;

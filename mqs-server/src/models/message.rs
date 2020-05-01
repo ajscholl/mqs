@@ -20,6 +20,7 @@ pub struct MessageInput<'a> {
     pub payload:          &'a [u8],
     pub content_type:     &'a str,
     pub content_encoding: Option<&'a str>,
+    pub trace_id:         Option<Uuid>,
 }
 
 #[derive(Insertable)]
@@ -34,6 +35,7 @@ pub struct NewMessage<'a> {
     pub receives:         i32,
     pub visible_since:    NaiveDateTime,
     pub created_at:       NaiveDateTime,
+    pub trace_id:         Option<Uuid>,
 }
 
 #[derive(Queryable, Associations, Identifiable, Serialize, Debug, Clone)]
@@ -47,6 +49,7 @@ pub struct Message {
     pub receives:         i32,
     pub visible_since:    NaiveDateTime,
     pub created_at:       NaiveDateTime,
+    pub trace_id:         Option<Uuid>,
 }
 
 pub(crate) fn add_pg_interval(time: &DateTime<Utc>, offset: &PgInterval) -> DateTime<Utc> {
@@ -88,6 +91,7 @@ impl MessageRepository for PgRepository {
                 receives: 0,
                 visible_since: visible_since.naive_utc(),
                 created_at: now.naive_utc(),
+                trace_id: input.trace_id,
             })
             .execute(self.conn.deref());
         match result {

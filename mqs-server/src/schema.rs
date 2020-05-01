@@ -9,6 +9,7 @@ table! {
         receives -> Int4,
         visible_since -> Timestamp,
         created_at -> Timestamp,
+        trace_id -> Nullable<Uuid>,
     }
 }
 

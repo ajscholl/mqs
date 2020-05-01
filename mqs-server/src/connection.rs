@@ -1,9 +1,14 @@
 use diesel::pg::PgConnection;
-use r2d2::{self, Error};
+use r2d2::{
+    self,
+    event::{AcquireEvent, CheckinEvent, CheckoutEvent, ReleaseEvent, TimeoutEvent},
+    Error,
+    HandleError,
+    HandleEvent,
+};
 use r2d2_diesel::ConnectionManager;
+use serde::export::fmt::Display;
 use std::{env, ops::Deref, time::Duration};
-
-use crate::logger::connection::ConnectionHandler;
 
 pub type Pool = r2d2::Pool<ConnectionManager<PgConnection>>;
 
@@ -45,6 +50,46 @@ impl Deref for DbConn {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+#[derive(Debug)]
+struct ConnectionHandler {}
+
+impl ConnectionHandler {
+    fn new() -> Self {
+        ConnectionHandler {}
+    }
+}
+
+impl HandleEvent for ConnectionHandler {
+    fn handle_acquire(&self, event: AcquireEvent) {
+        debug!("Acquired new connection {}", event.connection_id());
+    }
+
+    fn handle_release(&self, event: ReleaseEvent) {
+        debug!("Released connection {}", event.connection_id());
+    }
+
+    fn handle_checkout(&self, event: CheckoutEvent) {
+        debug!("Checked out connection {}", event.connection_id());
+    }
+
+    fn handle_timeout(&self, event: TimeoutEvent) {
+        warn!(
+            "Getting a connection from the pool timed out after {}ms",
+            event.timeout().as_millis()
+        );
+    }
+
+    fn handle_checkin(&self, event: CheckinEvent) {
+        debug!("Returned connection {}", event.connection_id());
+    }
+}
+
+impl<E: Display> HandleError<E> for ConnectionHandler {
+    fn handle_error(&self, error: E) {
+        error!("Connection error: {}", error);
     }
 }
 

@@ -16,12 +16,14 @@ use mqs_common::{
     QueueDescriptionOutput,
     QueuesResponse,
     DEFAULT_CONTENT_TYPE,
+    TRACE_ID_HEADER,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     error::Error,
     fmt::{Display, Formatter},
 };
+use uuid::Uuid;
 
 #[derive(Debug)]
 pub enum ClientError {
@@ -86,11 +88,44 @@ pub struct Service {
     max_body_size: Option<usize>,
 }
 
+#[derive(Clone)]
+pub struct PublishableMessage<'a> {
+    pub content_type:     &'a str,
+    pub content_encoding: Option<&'a str>,
+    pub trace_id:         Option<Uuid>,
+    pub message:          Vec<u8>,
+}
+
+impl<'a> PublishableMessage<'a> {
+    fn encode(self) -> (HeaderMap, Vec<u8>) {
+        let mut headers = HeaderMap::new();
+
+        if let Ok(content_type) = HeaderValue::from_str(self.content_type) {
+            headers.insert(CONTENT_TYPE, content_type);
+        }
+
+        if let Some(content_encoding) = self.content_encoding {
+            if let Ok(content_encoding) = HeaderValue::from_str(content_encoding) {
+                headers.insert(CONTENT_ENCODING, content_encoding);
+            }
+        }
+
+        if let Some(trace_id) = self.trace_id {
+            if let Ok(trace_id) = HeaderValue::from_str(&trace_id.to_string()) {
+                headers.insert(TRACE_ID_HEADER.name(), trace_id);
+            }
+        }
+
+        (headers, self.message)
+    }
+}
+
 #[derive(Debug)]
 pub struct MessageResponse {
     pub message_id:       String,
     pub content_type:     String,
     pub content_encoding: Option<String>,
+    pub trace_id:         Option<Uuid>,
     pub content:          Vec<u8>,
 }
 
@@ -110,12 +145,22 @@ impl Service {
         self
     }
 
-    fn new_request(method: Method, uri: &str, body: Body) -> Result<Request<Body>, hyper::http::uri::InvalidUri> {
+    fn new_request(
+        method: Method,
+        uri: &str,
+        trace_id: Option<Uuid>,
+        body: Body,
+    ) -> Result<Request<Body>, hyper::http::uri::InvalidUri> {
         let mut req = Request::new(body);
         *req.uri_mut() = uri.parse()?;
         *req.method_mut() = method;
         req.headers_mut()
             .insert(CONNECTION, HeaderValue::from_static("keep-alive"));
+        if let Some(trace_id) = trace_id {
+            if let Ok(value) = HeaderValue::from_str(&trace_id.to_string()) {
+                req.headers_mut().insert(TRACE_ID_HEADER.name(), value);
+            }
+        }
         Ok(req)
     }
 
@@ -156,11 +201,12 @@ impl Service {
         &self,
         method: Method,
         uri: &str,
+        trace_id: Option<Uuid>,
         request: &T,
     ) -> Result<Response<Body>, ClientError> {
         self.request(|| {
             let message = serde_json::to_string(request)?;
-            let mut req = Self::new_request(method.clone(), uri, Body::from(message))?;
+            let mut req = Self::new_request(method.clone(), uri, trace_id, Body::from(message))?;
             req.headers_mut()
                 .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
             Ok::<_, ClientError>(req)
@@ -171,32 +217,43 @@ impl Service {
     pub async fn create_queue(
         &self,
         queue_name: &str,
+        trace_id: Option<Uuid>,
         config: &QueueConfig,
     ) -> Result<Option<QueueConfig>, ClientError> {
         let uri = format!("{}/queues/{}", &self.host, queue_name);
-        let response = self.json_request(Method::PUT, &uri, config).await?;
+        let response = self.json_request(Method::PUT, &uri, trace_id, config).await?;
         self.parse_response_maybe(response, 201, 409).await
     }
 
     pub async fn update_queue(
         &self,
         queue_name: &str,
+        trace_id: Option<Uuid>,
         config: &QueueConfig,
     ) -> Result<Option<QueueConfig>, ClientError> {
         let uri = format!("{}/queues/{}", &self.host, queue_name);
-        let response = self.json_request(Method::POST, &uri, config).await?;
+        let response = self.json_request(Method::POST, &uri, trace_id, config).await?;
         self.parse_response_maybe(response, 200, 404).await
     }
 
-    pub async fn delete_queue(&self, queue_name: &str) -> Result<Option<QueueConfig>, ClientError> {
+    pub async fn delete_queue(
+        &self,
+        trace_id: Option<Uuid>,
+        queue_name: &str,
+    ) -> Result<Option<QueueConfig>, ClientError> {
         let uri = format!("{}/queues/{}", &self.host, queue_name);
         let response = self
-            .request(|| Self::new_request(Method::DELETE, &uri, Body::default()))
+            .request(|| Self::new_request(Method::DELETE, &uri, trace_id, Body::default()))
             .await?;
         self.parse_response_maybe(response, 200, 404).await
     }
 
-    pub async fn get_queues(&self, offset: Option<usize>, limit: Option<usize>) -> Result<QueuesResponse, ClientError> {
+    pub async fn get_queues(
+        &self,
+        trace_id: Option<Uuid>,
+        offset: Option<usize>,
+        limit: Option<usize>,
+    ) -> Result<QueuesResponse, ClientError> {
         let uri = match (offset, limit) {
             (Some(offset), Some(limit)) => format!("{}/queues?offset={}&limit={}", &self.host, offset, limit),
             (Some(offset), None) => format!("{}/queues?offset={}", &self.host, offset),
@@ -204,7 +261,7 @@ impl Service {
             (None, None) => format!("{}/queues", &self.host),
         };
         let mut response = self
-            .request(|| Self::new_request(Method::GET, &uri, Body::default()))
+            .request(|| Self::new_request(Method::GET, &uri, trace_id, Body::default()))
             .await?;
         match response.status().as_u16() {
             200 => {
@@ -219,10 +276,14 @@ impl Service {
         }
     }
 
-    pub async fn describe_queue(&self, queue_name: &str) -> Result<Option<QueueDescriptionOutput>, ClientError> {
+    pub async fn describe_queue(
+        &self,
+        trace_id: Option<Uuid>,
+        queue_name: &str,
+    ) -> Result<Option<QueueDescriptionOutput>, ClientError> {
         let uri = format!("{}/queues/{}", &self.host, queue_name);
         let response = self
-            .request(|| Self::new_request(Method::GET, &uri, Body::default()))
+            .request(|| Self::new_request(Method::GET, &uri, trace_id, Body::default()))
             .await?;
         self.parse_response_maybe(response, 200, 404).await
     }
@@ -251,11 +312,16 @@ impl Service {
         let content_encoding = headers
             .get(CONTENT_ENCODING)
             .map_or_else(|| None, |h| h.to_str().map_or_else(|_| None, |s| Some(s.to_string())));
+        let trace_id = headers
+            .get(TRACE_ID_HEADER.name())
+            .map_or_else(|| None, |v| v.to_str().map_or_else(|_| None, |s| Some(s)))
+            .map_or_else(|| None, |s| Uuid::parse_str(s).map_or_else(|_| None, |id| Some(id)));
         let content = get_body()?;
         Ok(MessageResponse {
             message_id,
             content_type,
             content_encoding,
+            trace_id,
             content,
         })
     }
@@ -273,7 +339,7 @@ impl Service {
         let uri = format!("{}/messages/{}", &self.host, queue_name);
         let mut response = self
             .request(|| {
-                let mut req = Self::new_request(Method::GET, &uri, Body::default())?;
+                let mut req = Self::new_request(Method::GET, &uri, None, Body::default())?;
                 if let Ok(value) = HeaderValue::from_str(&format!("{}", limit)) {
                     req.headers_mut()
                         .insert(HeaderName::from_static("x-mqs-max-messages"), value);
@@ -318,20 +384,18 @@ impl Service {
     pub async fn publish_message(
         &self,
         queue_name: &str,
-        content_type: &str,
-        content_encoding: Option<&str>,
-        message: Vec<u8>,
+        message: PublishableMessage<'_>,
     ) -> Result<bool, ClientError> {
         let uri = format!("{}/messages/{}", &self.host, queue_name);
         let response = self
             .request(|| {
-                let mut req = Self::new_request(Method::POST, &uri, Body::from(message.clone()))?;
-                if let Ok(content_type) = HeaderValue::from_str(content_type) {
-                    req.headers_mut().insert(CONTENT_TYPE, content_type);
-                }
-                if let Some(content_encoding) = content_encoding {
-                    if let Ok(content_encoding) = HeaderValue::from_str(content_encoding) {
-                        req.headers_mut().insert(CONTENT_ENCODING, content_encoding);
+                let (headers, body) = message.clone().encode();
+                let mut req = Self::new_request(Method::POST, &uri, None, Body::from(body))?;
+                for (key, value) in headers.into_iter() {
+                    // we never get the same header twice from PublishableMessage::encode, so we
+                    // can just ignore that case
+                    if let Some(key) = key {
+                        req.headers_mut().insert(key, value);
                     }
                 }
                 Ok::<_, ClientError>(req)
@@ -347,13 +411,13 @@ impl Service {
     pub async fn publish_messages(
         &self,
         queue_name: &str,
-        messages: &Vec<(HeaderMap, Vec<u8>)>,
+        messages: &Vec<PublishableMessage<'_>>,
     ) -> Result<bool, ClientError> {
         let uri = format!("{}/messages/{}", &self.host, queue_name);
         let response = self
             .request(|| {
-                let (boundary, body) = multipart::encode(messages);
-                let mut req = Self::new_request(Method::POST, &uri, Body::from(body))?;
+                let (boundary, body) = multipart::encode(messages.iter().map(|msg| msg.clone().encode()));
+                let mut req = Self::new_request(Method::POST, &uri, None, Body::from(body))?;
                 req.headers_mut().insert(
                     CONTENT_TYPE,
                     HeaderValue::from_str(&format!("multipart/mixed; boundary={}", boundary))?,
@@ -368,10 +432,10 @@ impl Service {
         }
     }
 
-    pub async fn delete_message(&self, message_id: &str) -> Result<bool, ClientError> {
+    pub async fn delete_message(&self, trace_id: Option<Uuid>, message_id: &str) -> Result<bool, ClientError> {
         let uri = format!("{}/messages/{}", &self.host, message_id);
         let response = self
-            .request(|| Self::new_request(Method::DELETE, &uri, Body::default()))
+            .request(|| Self::new_request(Method::DELETE, &uri, trace_id, Body::default()))
             .await?;
         match response.status().as_u16() {
             200 => Ok(true),
@@ -383,7 +447,7 @@ impl Service {
     pub async fn check_health(&self) -> Result<bool, ClientError> {
         let uri = format!("{}/health", &self.host);
         let mut response = self
-            .request(|| Self::new_request(Method::GET, &uri, Body::default()))
+            .request(|| Self::new_request(Method::GET, &uri, None, Body::default()))
             .await?;
         let body = match response.status().as_u16() {
             200 => Ok(read_body(response.body_mut(), self.max_body_size).await?),

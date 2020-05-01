@@ -9,7 +9,7 @@ use std::{
 use uuid::Uuid;
 
 /// Encode data as a multipart/mixed document, return the boundary and the body
-pub fn encode(messages: &Vec<(HeaderMap, Vec<u8>)>) -> (String, Vec<u8>) {
+pub fn encode<I: Iterator<Item = (HeaderMap, Vec<u8>)>>(messages: I) -> (String, Vec<u8>) {
     let boundary = Uuid::new_v4().to_string();
     let full_boundary = format!("--{}", &boundary).into_bytes();
     let mut body = Vec::with_capacity(4096);
@@ -17,7 +17,7 @@ pub fn encode(messages: &Vec<(HeaderMap, Vec<u8>)>) -> (String, Vec<u8>) {
     for (headers, message) in messages {
         body.extend_from_slice(full_boundary.as_slice());
         body.extend_from_slice("\r\n".as_bytes());
-        for (header_name, header_value) in headers {
+        for (header_name, header_value) in &headers {
             body.extend_from_slice(header_name.as_str().as_bytes());
             body.extend_from_slice(": ".as_bytes());
             body.extend_from_slice(header_value.as_bytes());
@@ -318,7 +318,7 @@ mod test {
 
     #[test]
     fn encode_multipart() {
-        let (boundary, body) = encode(&get_input());
+        let (boundary, body) = encode(get_input().into_iter());
         assert_eq!(
             std::str::from_utf8(body.as_slice()).unwrap(),
             format!(
@@ -381,7 +381,7 @@ mod test {
     #[test]
     fn gen_and_parse() {
         let input = get_input();
-        let (boundary, body) = encode(&input);
+        let (boundary, body) = encode(input.clone().into_iter());
         assert!(!boundary.starts_with("--"));
         let body_string = std::str::from_utf8(body.as_slice());
         assert!(body_string.is_ok());

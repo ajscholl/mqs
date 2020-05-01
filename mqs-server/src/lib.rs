@@ -6,7 +6,6 @@ extern crate log;
 extern crate serde_derive;
 
 pub mod connection;
-pub mod logger;
 pub mod models;
 pub mod router;
 pub mod routes;
