@@ -6,7 +6,7 @@ ARG appDir
 RUN ((groupadd -r www-data && useradd -r -g www-data www-data) || true) && \
     apt-get update && \
     apt-get upgrade -yy && \
-    apt-get install -yy libpq5 libsqlite3-0 libmariadbclient18 && \
+    apt-get install -yy libpq5 libsqlite3-0 libmariadbclient18 curl && \
     apt-get autoremove && \
     rm -rf /var/lib/apt/lists/* && \
     mkdir -p /var/lib/app && \
