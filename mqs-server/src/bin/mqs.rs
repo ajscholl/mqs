@@ -26,8 +26,10 @@ use tokio::{runtime::Builder, time::delay_for};
 
 use mqs_common::{
     logger::{
+        configure_logger,
         json::Logger,
         trace_id::{create_trace_id, with_trace_id},
+        NewJsonLogger,
     },
     router::{handler::handle, Router},
 };
@@ -49,7 +51,7 @@ struct RepoSource {
 }
 
 impl RepoSource {
-    fn new(pool: Arc<Pool>) -> Self {
+    const fn new(pool: Arc<Pool>) -> Self {
         RepoSource { pool }
     }
 }
@@ -110,10 +112,8 @@ fn get_max_message_size() -> usize {
 fn main() {
     dotenv().ok();
 
-    static LOGGER: Lazy<Logger<Stdout>> = Lazy::new(|| Logger::new(Level::Info, std::io::stdout()));
-    log::set_logger(LOGGER.deref())
-        .map(|()| log::set_max_level(LOGGER.level().to_level_filter()))
-        .unwrap();
+    static LOGGER: Lazy<Logger<Stdout>, NewJsonLogger> = Lazy::new(NewJsonLogger::new(Level::Info));
+    configure_logger(LOGGER.deref());
 
     let (pool, pool_size) = init_pool();
     let mut rt = Builder::new()

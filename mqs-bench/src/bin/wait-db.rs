@@ -6,16 +6,14 @@ use dotenv::dotenv;
 use log::Level;
 use std::{io::Stdout, ops::Deref, thread::sleep, time::Duration};
 
-use mqs_common::logger::json::Logger;
+use mqs_common::logger::{configure_logger, json::Logger, NewJsonLogger};
 use mqs_server::connection::init_pool_maybe;
 
 fn main() {
     dotenv().ok();
 
-    static LOGGER: Lazy<Logger<Stdout>> = Lazy::new(|| Logger::new(Level::Debug, std::io::stdout()));
-    log::set_logger(LOGGER.deref())
-        .map(|()| log::set_max_level(LOGGER.level().to_level_filter()))
-        .unwrap();
+    static LOGGER: Lazy<Logger<Stdout>, NewJsonLogger> = Lazy::new(NewJsonLogger::new(Level::Debug));
+    configure_logger(LOGGER.deref());
 
     loop {
         match init_pool_maybe() {

@@ -98,7 +98,7 @@ mod test {
     }
 
     impl TestWriter {
-        fn new() -> Self {
+        const fn new() -> Self {
             TestWriter {
                 written: Vec::new(),
                 flushed: false,

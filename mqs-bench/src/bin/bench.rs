@@ -21,7 +21,7 @@ struct StringError {
 }
 
 impl StringError {
-    fn new(error: &'static str) -> StringError {
+    const fn new(error: &'static str) -> StringError {
         StringError { error }
     }
 }

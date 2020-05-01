@@ -22,6 +22,7 @@ services:
       ENV: dev
       DATABASE_URL: postgres://root:6f55ceed83f286e23fbd1ae3323ab5704867a716e0bb6cb0c7d8e026805729b9@postgres/test
       MAX_POOL_SIZE: 25
+      LOG_LEVEL: warn
     expose:
     - 7843
     networks:

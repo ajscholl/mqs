@@ -1,3 +1,5 @@
+#![feature(unboxed_closures, fn_traits)]
+
 #[macro_use]
 extern crate log;
 #[macro_use]
