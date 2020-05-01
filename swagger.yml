@@ -1,10 +1,7 @@
 openapi: 3.0.0
-servers:
-  - description: SwaggerHub API Auto Mocking
-    url: https://virtserver.swaggerhub.com/ajscholl/mqs/1.0.0
 info:
   description: This describes the API provided by MQS
-  version: "1.0.0"
+  version: "0.3"
   title: MQS API
   contact:
     email: jonas.scholl@lingumatiker.de
@@ -18,6 +15,22 @@ tags:
     description: Publishing, consuming and deleting messages
 paths:
   /queues/{queueName}:
+    parameters:
+      - in: header
+        name: X-TRACE-ID
+        description: UUID used to trace a single request through various systems.
+        required: false
+        schema:
+          type: string
+          format: uuid
+          example: '33526d1f-eb66-447b-872c-aae86b6774b4'
+      - in: path
+        name: queueName
+        description: Name of the queue to operate on
+        required: true
+        schema:
+          type: string
+          example: tasks
     get:
       tags:
         - queues
@@ -27,13 +40,6 @@ paths:
         Looks up the configuration of a queue as well as how many messages are currently
         stored in the queue, how old the oldest message is and how many messages are
         currently visible.
-      parameters:
-        - in: path
-          name: queueName
-          description: Name of the queue to describe
-          required: true
-          schema:
-            type: string
       responses:
         '200':
           description: |
@@ -62,13 +68,6 @@ paths:
       description: |
         Overwrite the configuration of an existing queue.
         Returns the new configuration.
-      parameters:
-        - in: path
-          name: queueName
-          description: Name of the queue to update
-          required: true
-          schema:
-            type: string
       responses:
         '200':
           description: |
@@ -115,13 +114,6 @@ paths:
         Create the configuration for a new queue.
         Does not overwrite existing queues.
         Returns the new configuration.
-      parameters:
-        - in: path
-          name: queueName
-          description: Name of the queue to create
-          required: true
-          schema:
-            type: string
       responses:
         '201':
           description: |
@@ -164,13 +156,6 @@ paths:
       description: |
         Delete the configuration of a queue and all messages currently stored in it.
         Returns the old configuration.
-      parameters:
-        - in: path
-          name: queueName
-          description: Name of the queue to delete
-          required: true
-          schema:
-            type: string
       responses:
         '200':
           description: |
@@ -192,6 +177,15 @@ paths:
             The server failed to acquire required resources to delete the queue.
             Try again with exponential backoff.
   /queues:
+    parameters:
+      - in: header
+        name: X-TRACE-ID
+        description: UUID used to trace a single request through various systems.
+        required: false
+        schema:
+          type: string
+          format: uuid
+          example: '33526d1f-eb66-447b-872c-aae86b6774b4'
     get:
       tags:
         - queues
@@ -233,6 +227,22 @@ paths:
             The server failed to acquire required resources to list queues.
             Try again with exponential backoff.
   /messages/{queueName}:
+    parameters:
+      - in: header
+        name: X-TRACE-ID
+        description: UUID used to trace a single request through various systems.
+        required: false
+        schema:
+          type: string
+          format: uuid
+          example: '33526d1f-eb66-447b-872c-aae86b6774b4'
+      - in: path
+        name: queueName
+        description: Name of the queue to operate on
+        required: true
+        schema:
+          type: string
+          example: tasks
     get:
       tags:
         - messages
@@ -242,13 +252,6 @@ paths:
         Get up to a specified amount of messages.
         Returned messages will not be visible until timeout configured in queue expires.
         If specified, blocks until either messages may be available or a timeout expires.
-      parameters:
-        - in: path
-          name: queueName
-          description: Name of the queue to receive messages from
-          required: true
-          schema:
-            type: string
         - in: header
           name: X-MQS-MAX-MESSAGES
           description: Number of messages to return. Defaults to 1.
@@ -277,6 +280,12 @@ paths:
                 format: uuid
                 example: 'a7d46b8e-32fe-4d35-a3af-74f9a39da2dc'
               description: Id of the message returned.
+            X-TRACE-ID:
+              schema:
+                type: string
+                format: uuid
+                example: '33526d1f-eb66-447b-872c-aae86b6774b4'
+              description: Value of X-TRACE-ID header during message publish
             Content-Type:
               schema:
                 type: string
@@ -312,12 +321,6 @@ paths:
         each single multipart part will be considered as a separate message.
         Additional headers can be set, but will be ignored.
       parameters:
-        - in: path
-          name: queueName
-          description: Name of the queue to publish the messages to
-          required: true
-          schema:
-            type: string
         - in: header
           name: Content-Type
           description: Content type of the data published. Will be stored and returned upon receive. Defaults to "application/octet-stream".
@@ -350,6 +353,15 @@ paths:
             The server failed to acquire required resources to publish a message.
             Try again with exponential backoff.
   /messages/{messageId}:
+    parameters:
+      - in: header
+        name: X-TRACE-ID
+        description: UUID used to trace a single request through various systems.
+        required: false
+        schema:
+          type: string
+          format: uuid
+          example: '33526d1f-eb66-447b-872c-aae86b6774b4'
     delete:
       tags:
         - messages
