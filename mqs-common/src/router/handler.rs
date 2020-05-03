@@ -32,7 +32,7 @@ pub async fn handle<T, S>(
                         response
                             .headers_mut()
                             .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                        *response.status_mut() = Status::InternalServerError.to_hyper();
+                        *response.status_mut() = Status::InternalServerError.into();
                         response
                     },
                     Ok(None) => {
@@ -42,7 +42,7 @@ pub async fn handle<T, S>(
                         response
                             .headers_mut()
                             .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                        *response.status_mut() = Status::PayloadTooLarge.to_hyper();
+                        *response.status_mut() = Status::PayloadTooLarge.into();
                         response
                     },
                     Ok(Some(body)) => {
@@ -58,7 +58,7 @@ pub async fn handle<T, S>(
                 response
                     .headers_mut()
                     .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                *response.status_mut() = Status::NotFound.to_hyper();
+                *response.status_mut() = Status::NotFound.into();
                 response
             }
         }
@@ -73,7 +73,7 @@ pub async fn handle<T, S>(
         response
             .headers_mut()
             .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        *response.status_mut() = Status::ServiceUnavailable.to_hyper();
+        *response.status_mut() = Status::ServiceUnavailable.into();
         response
     };
     response.headers_mut().insert(SERVER, HeaderValue::from_static("mqs"));

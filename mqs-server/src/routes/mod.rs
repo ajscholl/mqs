@@ -59,12 +59,12 @@ impl MqsResponse {
         match self {
             MqsResponse::StatusResponse(status) => {
                 let mut res = hyper::Response::new(Body::default());
-                *res.status_mut() = status.to_hyper();
+                *res.status_mut() = status.into();
                 res
             },
             MqsResponse::JsonResponse(status, body) => {
                 let mut res = hyper::Response::new(Body::from(body));
-                *res.status_mut() = status.to_hyper();
+                *res.status_mut() = status.into();
                 res.headers_mut()
                     .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
                 res
@@ -74,7 +74,7 @@ impl MqsResponse {
                     let message = messages.pop().unwrap();
 
                     let mut res = hyper::Response::new(Body::default());
-                    *res.status_mut() = status.to_hyper();
+                    *res.status_mut() = status.into();
                     Self::add_message_headers(res.headers_mut(), &message);
                     *res.body_mut() = Body::from(message.payload);
                     return res;
@@ -88,7 +88,7 @@ impl MqsResponse {
                 let (boundary, body) = multipart::encode(message_parts);
 
                 let mut res = hyper::Response::new(Body::from(body));
-                *res.status_mut() = status.to_hyper();
+                *res.status_mut() = status.into();
                 res.headers_mut().insert(
                     CONTENT_TYPE,
                     HeaderValue::from_str(&format!("multipart/mixed; boundary={}", &boundary)).unwrap(),

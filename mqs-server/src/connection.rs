@@ -2,6 +2,7 @@ use diesel::pg::PgConnection;
 use r2d2::{
     self,
     event::{AcquireEvent, CheckinEvent, CheckoutEvent, ReleaseEvent, TimeoutEvent},
+    Builder,
     Error,
     HandleError,
     HandleEvent,
@@ -14,16 +15,22 @@ pub type Pool = r2d2::Pool<ConnectionManager<PgConnection>>;
 
 pub struct DbConn(pub r2d2::PooledConnection<ConnectionManager<PgConnection>>);
 
-pub fn init_pool_maybe() -> Result<(Pool, u16), Error> {
-    let manager = ConnectionManager::<PgConnection>::new(database_url());
+pub fn init_pool_builder() -> Result<(Builder<ConnectionManager<PgConnection>>, u16), Error> {
     let (min_size, max_size) = pool_size();
-    let pool = Pool::builder()
+    let pool_builder = Pool::builder()
         .min_idle(Some(min_size as u32))
         .max_size(max_size as u32)
         .connection_timeout(Duration::from_secs(1))
         .event_handler(Box::new(ConnectionHandler::new()))
-        .error_handler(Box::new(ConnectionHandler::new()))
-        .build(manager)?;
+        .error_handler(Box::new(ConnectionHandler::new()));
+
+    Ok((pool_builder, max_size))
+}
+
+pub fn init_pool_maybe() -> Result<(Pool, u16), Error> {
+    let manager = ConnectionManager::<PgConnection>::new(database_url());
+    let (pool_builder, max_size) = init_pool_builder()?;
+    let pool = pool_builder.build(manager)?;
 
     Ok((pool, max_size))
 }
@@ -104,10 +111,12 @@ mod test {
     }
 
     #[test]
-    fn pool_size() {
+    fn pool() {
         env::set_var("MAX_POOL_SIZE", "50");
-        assert_eq!((50, 50), super::pool_size());
+        assert_eq!((50, 50), pool_size());
         env::set_var("MIN_POOL_SIZE", "20");
-        assert_eq!((20, 50), super::pool_size());
+        assert_eq!((20, 50), pool_size());
+        let (_builder, max_size) = init_pool_builder().unwrap();
+        assert_eq!(max_size, 50);
     }
 }

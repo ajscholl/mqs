@@ -49,6 +49,7 @@ use hyper::{
     Method,
     Request,
     Response,
+    StatusCode,
 };
 use mqs_common::{
     multipart,
@@ -281,7 +282,7 @@ impl Service {
     {
         loop {
             let res = self.client.request(builder()?).await?;
-            if res.status() != ServiceUnavailable.to_hyper() {
+            if res.status() != StatusCode::from(ServiceUnavailable) {
                 return Ok(res);
             }
         }
@@ -834,8 +835,9 @@ mod test {
                 .await
                 .unwrap_err()
         });
+        let hyper_error_string = format!("HyperError({:?})", &hyper_error);
         let err: ClientError = ClientError::from(hyper_error);
-        assert_eq!(format!("{}", err), "HyperError(hyper::Error(Connect, ConnectError(\"tcp connect error\", Os { code: 111, kind: ConnectionRefused, message: \"Connection refused\" })))");
+        assert_eq!(format!("{}", err), hyper_error_string);
 
         let invalid_uri_error = "".parse::<Uri>().unwrap_err();
         let err = ClientError::from(invalid_uri_error);

@@ -69,7 +69,7 @@ mod test {
         queue::QueueInput,
         test::{CloneSource, TestRepo},
     };
-    use hyper::{header::HeaderName, Body, Request, Response};
+    use hyper::{header::HeaderName, Body, Request, Response, StatusCode};
     use mqs_common::{
         router::Handler,
         status::Status,
@@ -107,14 +107,14 @@ mod test {
         let handler = handler.unwrap();
         {
             let mut response = run_handler(handler.clone(), &repo);
-            assert_eq!(Status::Ok.to_hyper(), response.status());
+            assert_eq!(StatusCode::from(Status::Ok), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(body, "green".as_bytes().to_vec());
         }
         {
             repo.lock().unwrap().set_health(false);
             let mut response = run_handler(handler, &repo);
-            assert_eq!(Status::Ok.to_hyper(), response.status());
+            assert_eq!(StatusCode::from(Status::Ok), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(body, "red".as_bytes().to_vec());
         }
@@ -135,7 +135,7 @@ mod test {
                     .as_bytes()
                     .to_vec(),
             );
-            assert_eq!(Status::Created.to_hyper(), response.status());
+            assert_eq!(StatusCode::from(Status::Created), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(
                 body,
@@ -152,7 +152,7 @@ mod test {
                     .as_bytes()
                     .to_vec(),
             );
-            assert_eq!(Status::Conflict.to_hyper(), response.status());
+            assert_eq!(StatusCode::from(Status::Conflict), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(body.len(), 0);
         }
@@ -161,7 +161,7 @@ mod test {
         let get_handler = get_handler.unwrap();
         {
             let mut response = run_handler(get_handler.clone(), &repo);
-            assert_eq!(Status::Ok.to_hyper(), response.status());
+            assert_eq!(StatusCode::from(Status::Ok), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(
                 body,
@@ -175,7 +175,7 @@ mod test {
         let list_handler = list_handler.unwrap();
         {
             let mut response = run_handler(list_handler, &repo);
-            assert_eq!(Status::Ok.to_hyper(), response.status());
+            assert_eq!(StatusCode::from(Status::Ok), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(
                 body,
@@ -195,7 +195,7 @@ mod test {
                     .as_bytes()
                     .to_vec(),
             );
-            assert_eq!(Status::Ok.to_hyper(), response.status());
+            assert_eq!(StatusCode::from(Status::Ok), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(
                 body,
@@ -209,7 +209,7 @@ mod test {
         let delete_handler = delete_handler.unwrap();
         {
             let mut response = run_handler(delete_handler, &repo);
-            assert_eq!(Status::Ok.to_hyper(), response.status());
+            assert_eq!(StatusCode::from(Status::Ok), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(
                 body,
@@ -220,7 +220,7 @@ mod test {
         }
         {
             let mut response = run_handler(get_handler, &repo);
-            assert_eq!(Status::NotFound.to_hyper(), response.status());
+            assert_eq!(StatusCode::from(Status::NotFound), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(body.len(), 0);
         }
@@ -250,7 +250,7 @@ mod test {
                 &repo,
                 "{\"content\": \"my message\"}".as_bytes().to_vec(),
             );
-            assert_eq!(Status::Created.to_hyper(), response.status());
+            assert_eq!(StatusCode::from(Status::Created), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(body.len(), 0);
         }
@@ -259,7 +259,7 @@ mod test {
         let receive_handler = receive_handler.unwrap();
         let message_id = {
             let mut response = run_handler(receive_handler, &repo);
-            assert_eq!(Status::Ok.to_hyper(), response.status());
+            assert_eq!(StatusCode::from(Status::Ok), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(body, "{\"content\": \"my message\"}".as_bytes().to_vec());
             let response_message_id = response.headers().get(HeaderName::from_static("x-mqs-message-id"));
@@ -271,7 +271,7 @@ mod test {
             assert!(delete_handler.is_some());
             let delete_handler = delete_handler.unwrap();
             let mut response = run_handler(delete_handler, &repo);
-            assert_eq!(Status::Ok.to_hyper(), response.status());
+            assert_eq!(StatusCode::from(Status::Ok), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(body.len(), 0);
         }

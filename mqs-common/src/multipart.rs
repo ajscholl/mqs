@@ -34,8 +34,21 @@ pub fn encode<I: Iterator<Item = (HeaderMap, Vec<u8>)>>(messages: I) -> (String,
 }
 
 /// Return the boundary from "multipart/mixed; boundary=..."
+///
+/// ```
+/// use mqs_common::multipart::is_multipart;
+///
+/// fn main() {
+///     assert_eq!(is_multipart("multipart/mixed; boundary=abc"), Some("--abc".to_string()));
+///     assert_eq!(
+///         is_multipart("multipart/mixed; boundary=\"abc def\""),
+///         Some("--abc def".to_string())
+///     );
+///     assert_eq!(is_multipart("multipart/other; boundary=\"abc def\""), None);
+///     assert_eq!(is_multipart("test/plain"), None);
+/// }
+/// ```
 pub fn is_multipart(content_type: &str) -> Option<String> {
-    // TODO: a real parser would be nice...
     let (top, rest) = {
         let mut i = content_type.splitn(2, "/").into_iter();
         let top = i.next();
@@ -76,10 +89,14 @@ pub fn is_multipart(content_type: &str) -> Option<String> {
     None
 }
 
+/// Error returned in case a slice is not a valid multipart document.
 #[derive(Debug, Clone, Copy)]
 pub enum ParseError {
+    /// There was invalid data after a boundary.
     InvalidChunk,
+    /// An invalid header name was encountered in some chunk.
     InvalidHeaderName,
+    /// An invalid header value was encountered in some chunk.
     InvalidHeaderValue,
 }
 
