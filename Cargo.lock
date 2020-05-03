@@ -434,6 +434,7 @@ dependencies = [
  "mqs-common",
  "serde",
  "serde_json",
+ "tokio",
  "uuid",
 ]
 

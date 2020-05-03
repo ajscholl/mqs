@@ -83,6 +83,8 @@ pub(crate) mod test {
         }
 
         fn with_queues_mut<R, F: FnOnce(&mut HashMap<String, Queue>) -> R>(&self, f: F) -> R {
+            // not the fastest way, but this is only test code and like this we can avoid
+            // using unsafe code (which I prefer in tests)
             let mut queues = self.queues.replace(HashMap::new());
             let r = f(&mut queues);
             self.queues.replace(queues);

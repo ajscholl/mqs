@@ -76,7 +76,7 @@ fn main() -> Result<(), AnyError> {
         let queues = s.get_queues(None, None, None).await?;
         // clear data
         for queue in queues.queues {
-            let result = s.delete_queue(None, &queue.name).await?;
+            let result = s.delete_queue(&queue.name, None).await?;
 
             if result.is_none() {
                 Err(StringError::new("Failed to delete queue"))?;
@@ -129,7 +129,7 @@ fn main() -> Result<(), AnyError> {
 
         for (queue, work) in pending {
             work.await?;
-            let info = s.describe_queue(None, &queue).await?;
+            let info = s.describe_queue(&queue, None).await?;
             if let Some(description) = info {
                 if description.status.messages != 10000 {
                     Err(StringError::new("Wrong number of messages found"))?;
@@ -188,7 +188,7 @@ fn main() -> Result<(), AnyError> {
 }
 
 async fn check_queue_empty(s: &Service, queue: &str) -> Result<(), AnyError> {
-    let info = s.describe_queue(None, queue).await?;
+    let info = s.describe_queue(queue, None).await?;
     if let Some(description) = info {
         if description.status.messages != 0 {
             Err(StringError::new("Queue not yet empty"))?

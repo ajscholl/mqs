@@ -1,4 +1,5 @@
 #![warn(
+    missing_docs,
     rust_2018_idioms,
     future_incompatible,
     missing_copy_implementations,
@@ -8,6 +9,35 @@
     unused_qualifications,
     variant_size_differences
 )]
+#![cfg_attr(test, deny(warnings))]
+//! Client library for mqs servers
+//!
+//! # Overview
+//!
+//! The main type of this crate is `Service`. A service is a configured client to talk directly with
+//! an mqs server, manage queues, or publish, receive, and delete messages.
+//!
+//! ## Example
+//!
+//! You have to use tokio or a similar library as this library makes extensive use of futures to
+//! run the different methods provided by `Service`. To see if for example an mqs server is running
+//! on some host, you could write the following:
+//!
+//! ```
+//! #[macro_use]
+//! extern crate tokio;
+//!
+//! use mqs_client::Service;
+//! use tokio::runtime::Builder;
+//!
+//! fn main() {
+//!     let service = Service::new("https://mqs.example.com:7843");
+//!
+//!     let mut rt = Builder::new().enable_all().threaded_scheduler().build().unwrap();
+//!     let success = rt.block_on(async { service.check_health().await });
+//!     assert!(!success.is_ok());
+//! }
+//! ```
 
 use hyper::{
     client::HttpConnector,
@@ -36,16 +66,27 @@ use std::{
 };
 use uuid::Uuid;
 
+/// If something goes wrong, we return an instance of `ClientError` to tell you what exactly failed
+/// during the operation.
 #[derive(Debug)]
 pub enum ClientError {
+    /// Hyper returned some error
     HyperError(hyper::Error),
+    /// An invalid URI was provided
     InvalidUri(hyper::http::uri::InvalidUri),
+    /// An I/O error occurred.
     IoError(std::io::Error),
+    /// A JSON response failed to parse.
     ParseError(serde_json::error::Error),
+    /// A value could not converted to a header value because it contained invalid characters.
     InvalidHeaderValue(hyper::header::InvalidHeaderValue),
+    /// The server returned an invalid multipart response.
     MultipartParseError(multipart::ParseError),
+    /// The server returned an error status code.
     ServiceError(u16),
+    /// The response returned by the server was larger than what the client was configured to accept.
     TooLargeResponse,
+    /// The server returned an invalid health check response.
     HealthCheckError,
 }
 
@@ -93,17 +134,24 @@ impl From<multipart::ParseError> for ClientError {
     }
 }
 
+/// A `Service` allows you to speak to a single mqs server.
 pub struct Service {
     client:        Client<HttpConnector>,
     host:          String,
     max_body_size: Option<usize>,
 }
 
+/// A `PublishableMessage` contains all information a message can contain.
 #[derive(Clone)]
 pub struct PublishableMessage<'a> {
+    /// Content type of the message.
     pub content_type:     &'a str,
+    /// Content encoding of the message.
     pub content_encoding: Option<&'a str>,
+    /// Trace id of the message. You can use this to attach a unique identifier to a request and
+    /// later recover this identifier upon message consumption.
     pub trace_id:         Option<Uuid>,
+    /// Encoded body of the message.
     pub message:          Vec<u8>,
 }
 
@@ -131,18 +179,33 @@ impl<'a> PublishableMessage<'a> {
     }
 }
 
+/// A `MessageResponse` contains the same information as a `PublishableMessage` plus the id of the message.
 #[derive(Debug)]
 pub struct MessageResponse {
+    /// Id of the message. Needed to later delete the message so it will not be received again later.
     pub message_id:       String,
+    /// Content type of the message.
     pub content_type:     String,
+    /// Content encoding of the message.
     pub content_encoding: Option<String>,
+    /// Trace id of the message.
     pub trace_id:         Option<Uuid>,
+    /// Encoded body of the message.
     pub content:          Vec<u8>,
 }
 
 impl Service {
     const DEFAULT_MAX_BODY_SIZE: usize = 5 * 1024 * 1024;
 
+    /// Create a new instance.
+    ///
+    /// ```
+    /// use mqs_client::Service;
+    ///
+    /// fn main() {
+    ///     let _service = Service::new("https://mqs.example.com:7843");
+    /// }
+    /// ```
     pub fn new(host: &str) -> Service {
         Service {
             client:        Client::new(),
@@ -151,6 +214,21 @@ impl Service {
         }
     }
 
+    /// Configure the maximum body size we are prepared to accept. Should the server return a bigger
+    /// response, we return an error and drop the response instead of reading the whole response into
+    /// memory.
+    ///
+    /// ```
+    /// use mqs_client::Service;
+    ///
+    /// fn main() {
+    ///     let mut service = Service::new("https://mqs.example.com:7843");
+    ///     // allow at most 64 KiB
+    ///     service.set_max_body_size(Some(1024 * 64));
+    ///     // allow unlimited responses
+    ///     service.set_max_body_size(None);
+    /// }
+    /// ```
     pub fn set_max_body_size(&mut self, max_body_size: Option<usize>) -> &mut Self {
         self.max_body_size = max_body_size;
         self
@@ -225,6 +303,30 @@ impl Service {
         .await
     }
 
+    /// Create a new queue with the given name and configuration.
+    ///
+    /// ```
+    /// use mqs_client::{ClientError, Service};
+    /// use mqs_common::{QueueConfig, QueueRedrivePolicy};
+    ///
+    /// // create a new queue named "new-queue". The queue will not delay new messages,
+    /// // will hide messages for 30 seconds after they are received, delete messages older
+    /// // than 1 hour and send messages to the queue "my-queue-dead" after 3 receives.
+    /// async fn example(service: &Service) -> Result<Option<QueueConfig>, ClientError> {
+    ///     service
+    ///         .create_queue("new-queue", None, &QueueConfig {
+    ///             redrive_policy:        Some(QueueRedrivePolicy {
+    ///                 dead_letter_queue: "my-queue-dead".to_string(),
+    ///                 max_receives:      3,
+    ///             }),
+    ///             retention_timeout:     3600,
+    ///             visibility_timeout:    30,
+    ///             message_delay:         0,
+    ///             message_deduplication: true,
+    ///         })
+    ///         .await
+    /// }
+    /// ```
     pub async fn create_queue(
         &self,
         queue_name: &str,
@@ -236,6 +338,30 @@ impl Service {
         self.parse_response_maybe(response, 201, 409).await
     }
 
+    /// Update the configuration of a queue.
+    ///
+    /// ```
+    /// use mqs_client::{ClientError, Service};
+    /// use mqs_common::{QueueConfig, QueueRedrivePolicy};
+    ///
+    /// // update an existing queue named "existing-queue". The queue will not delay new messages,
+    /// // will hide messages for 30 seconds after they are received, delete messages older
+    /// // than 1 hour and send messages to the queue "my-queue-dead" after 3 receives.
+    /// async fn example(service: &Service) -> Result<Option<QueueConfig>, ClientError> {
+    ///     service
+    ///         .update_queue("existing-queue", None, &QueueConfig {
+    ///             redrive_policy:        Some(QueueRedrivePolicy {
+    ///                 dead_letter_queue: "my-queue-dead".to_string(),
+    ///                 max_receives:      3,
+    ///             }),
+    ///             retention_timeout:     3600,
+    ///             visibility_timeout:    30,
+    ///             message_delay:         0,
+    ///             message_deduplication: true,
+    ///         })
+    ///         .await
+    /// }
+    /// ```
     pub async fn update_queue(
         &self,
         queue_name: &str,
@@ -247,10 +373,21 @@ impl Service {
         self.parse_response_maybe(response, 200, 404).await
     }
 
+    /// Delete an existing queue. If the queue did exist, the configuration of the queue is returned, otherwise
+    /// `None` is returned. All messages currently stored in the queue are also deleted.
+    ///
+    /// ```
+    /// use mqs_client::{ClientError, Service};
+    /// use mqs_common::QueueConfig;
+    ///
+    /// async fn example(service: &Service) -> Result<Option<QueueConfig>, ClientError> {
+    ///     service.delete_queue("existing-queue", None).await
+    /// }
+    /// ```
     pub async fn delete_queue(
         &self,
-        trace_id: Option<Uuid>,
         queue_name: &str,
+        trace_id: Option<Uuid>,
     ) -> Result<Option<QueueConfig>, ClientError> {
         let uri = format!("{}/queues/{}", &self.host, queue_name);
         let response = self
@@ -259,6 +396,28 @@ impl Service {
         self.parse_response_maybe(response, 200, 404).await
     }
 
+    /// Retrieve a list of all queues.
+    ///
+    /// ```
+    /// use mqs_client::{ClientError, Service};
+    /// use uuid::Uuid;
+    ///
+    /// // Delete all queues found on a server (including all messages).
+    /// async fn delete_all_queues(service: &Service) -> Result<(), ClientError> {
+    ///     // a new trace_id for this operation, we will group all operations under this id
+    ///     // to easier see what belongs together in logs
+    ///     let trace_id = Uuid::new_v4();
+    ///
+    ///     loop {
+    ///         let queues = service.get_queues(Some(trace_id), None, Some(10)).await?;
+    ///         for queue in queues.queues {
+    ///             service.delete_queue(&queue.name, Some(trace_id)).await?;
+    ///         }
+    ///     }
+    ///
+    ///     Ok(())
+    /// }
+    /// ```
     pub async fn get_queues(
         &self,
         trace_id: Option<Uuid>,
@@ -287,10 +446,27 @@ impl Service {
         }
     }
 
+    /// Get information about a single queue.
+    ///
+    /// ```
+    /// use mqs_client::{ClientError, Service};
+    ///
+    /// async fn queue_exists(service: &Service, queue_name: &str) -> Result<bool, ClientError> {
+    ///     let description = service.describe_queue(queue_name, None).await?;
+    ///
+    ///     Ok(description.is_some())
+    /// }
+    ///
+    /// async fn has_redrive_policy(service: &Service, queue_name: &str) -> Result<bool, ClientError> {
+    ///     let description = service.describe_queue(queue_name, None).await?;
+    ///
+    ///     Ok(description.map_or_else(|| false, |description| description.redrive_policy.is_some()))
+    /// }
+    /// ```
     pub async fn describe_queue(
         &self,
-        trace_id: Option<Uuid>,
         queue_name: &str,
+        trace_id: Option<Uuid>,
     ) -> Result<Option<QueueDescriptionOutput>, ClientError> {
         let uri = format!("{}/queues/{}", &self.host, queue_name);
         let response = self
@@ -299,6 +475,26 @@ impl Service {
         self.parse_response_maybe(response, 200, 404).await
     }
 
+    /// Receive a single message from a queue.
+    ///
+    /// ```
+    /// use mqs_client::{ClientError, Service};
+    ///
+    /// async fn consume_one<F: FnOnce(String, Option<String>, Vec<u8>)>(
+    ///     service: &Service,
+    ///     queue_name: &str,
+    ///     callback: F,
+    /// ) -> Result<bool, ClientError> {
+    ///     match service.get_message(queue_name, None).await? {
+    ///         None => Ok(false),
+    ///         Some(msg) => {
+    ///             callback(msg.content_type, msg.content_encoding, msg.content);
+    ///             service.delete_message(msg.trace_id, &msg.message_id).await?;
+    ///             Ok(true)
+    ///         },
+    ///     }
+    /// }
+    /// ```
     pub async fn get_message(
         &self,
         queue_name: &str,
@@ -337,6 +533,29 @@ impl Service {
         })
     }
 
+    /// Receive one or more message from a queue.
+    ///
+    /// For example, to retrieve up to 20 messages, waiting up to 10 seconds,
+    /// the following function could be used:
+    ///
+    /// ```
+    /// use mqs_client::{ClientError, Service};
+    ///
+    /// async fn consume_multiple<F: Fn(String, Option<String>, Vec<u8>)>(
+    ///     service: &Service,
+    ///     queue_name: &str,
+    ///     callback: F,
+    /// ) -> Result<usize, ClientError> {
+    ///     let mut count = 0;
+    ///     for msg in service.get_messages(queue_name, 20, Some(10)).await? {
+    ///         callback(msg.content_type, msg.content_encoding, msg.content);
+    ///         service.delete_message(msg.trace_id, &msg.message_id).await?;
+    ///         count += 1;
+    ///     }
+    ///
+    ///     Ok(count)
+    /// }
+    /// ```
     pub async fn get_messages(
         &self,
         queue_name: &str,
@@ -392,6 +611,22 @@ impl Service {
         }
     }
 
+    /// Publish a single message to a queue.
+    ///
+    /// ```
+    /// use mqs_client::{ClientError, PublishableMessage, Service};
+    ///
+    /// async fn example(service: &Service) -> Result<bool, ClientError> {
+    ///     let message = PublishableMessage {
+    ///         trace_id:         None,
+    ///         content_encoding: None,
+    ///         content_type:     "application/json; encoding=utf-8",
+    ///         message:          "{}".as_bytes().to_vec(),
+    ///     };
+    ///
+    ///     service.publish_message("my-queue", message).await
+    /// }
+    /// ```
     pub async fn publish_message(
         &self,
         queue_name: &str,
@@ -419,6 +654,27 @@ impl Service {
         }
     }
 
+    /// Publish a set of messages to a queue.
+    ///
+    /// ```
+    /// use mqs_client::{ClientError, PublishableMessage, Service};
+    /// use uuid::Uuid;
+    ///
+    /// async fn example(service: &Service) -> Result<bool, ClientError> {
+    ///     let trace_id = Uuid::new_v4();
+    ///     let mut messages = Vec::with_capacity(10);
+    ///     for i in 0..messages.capacity() {
+    ///         messages.push(PublishableMessage {
+    ///             trace_id:         Some(trace_id),
+    ///             content_type:     "text/plain",
+    ///             content_encoding: None,
+    ///             message:          format!("Message {}", i).into_bytes(),
+    ///         });
+    ///     }
+    ///
+    ///     service.publish_messages("my-queue", &messages).await
+    /// }
+    /// ```
     pub async fn publish_messages(
         &self,
         queue_name: &str,
@@ -443,6 +699,29 @@ impl Service {
         }
     }
 
+    /// Delete a single message. The message is identified by its id and not by the queue in which it
+    /// currently resides (a redrive policy will move a message as soon as it hits the maximum receive
+    /// count. It will then be invisible in the new queue until the visibility timeout expires. Thus
+    /// it is possible for messages to be in different queues directly after they have been received
+    /// from some queue).
+    ///
+    /// ```
+    /// use mqs_client::{ClientError, Service};
+    ///
+    /// async fn consume_all<F: Fn(String, Option<String>, Vec<u8>)>(
+    ///     service: &Service,
+    ///     queue_name: &str,
+    ///     callback: F,
+    /// ) -> Result<(), ClientError> {
+    ///     loop {
+    ///         let messages = service.get_messages(queue_name, 10, Some(20)).await?;
+    ///         for msg in messages {
+    ///             callback(msg.content_type, msg.content_encoding, msg.content);
+    ///             service.delete_message(msg.trace_id, &msg.message_id).await?;
+    ///         }
+    ///     }
+    /// }
+    /// ```
     pub async fn delete_message(&self, trace_id: Option<Uuid>, message_id: &str) -> Result<bool, ClientError> {
         let uri = format!("{}/messages/{}", &self.host, message_id);
         let response = self
@@ -455,6 +734,24 @@ impl Service {
         }
     }
 
+    /// Evaluate the health of a service. Returns true if the service is healthy, false if it is not
+    /// healthy, `HealthCheckError` if the service responded with an invalid status.
+    ///
+    /// ```
+    /// #[macro_use]
+    /// extern crate tokio;
+    ///
+    /// use mqs_client::Service;
+    /// use tokio::runtime::Builder;
+    ///
+    /// fn main() {
+    ///     let service = Service::new("https://mqs.example.com:7843");
+    ///
+    ///     let mut rt = Builder::new().enable_all().threaded_scheduler().build().unwrap();
+    ///     let success = rt.block_on(async { service.check_health().await });
+    ///     assert!(!success.is_ok());
+    /// }
+    /// ```
     pub async fn check_health(&self) -> Result<bool, ClientError> {
         let uri = format!("{}/health", &self.host);
         let mut response = self
