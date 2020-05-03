@@ -31,7 +31,7 @@ version = "0.15.0"
 version = "0.13"
 
 [dependencies.tokio]
-version = "0.2.13"
+version = "0.2.20"
 features = ["rt-core", "rt-threaded", "rt-util", "sync", "blocking", "tcp", "time"]
 
 [dependencies.log]
@@ -53,7 +53,7 @@ version = "1.0.106"
 version = "1.0.106"
 
 [dependencies.serde_json]
-version = "1.0.44"
+version = "1.0.52"
 
 [dependencies.uuid]
 version = "0.8.1"

@@ -24,10 +24,10 @@ version = "1.0.106"
 version = "1.0.106"
 
 [dependencies.serde_json]
-version = "1.0.44"
+version = "1.0.52"
 
 [dependencies.tokio]
-version = "0.2.13"
+version = "0.2.20"
 features = ["rt-core", "rt-threaded", "rt-util", "sync", "blocking", "tcp", "time"]
 
 [dependencies.uuid]
