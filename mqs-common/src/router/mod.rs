@@ -2,13 +2,21 @@ use async_trait::async_trait;
 use hyper::{Body, Method, Request, Response};
 use std::{collections::hash_map::HashMap, sync::Arc};
 
-pub mod handler;
+mod handler;
 
+pub use handler::handle;
+
+/// A `Handler` represents a single route (Method + Path) a server provides.
 #[async_trait]
 pub trait Handler<A>: Sync + Send {
+    /// A function to determine whether we need to read the body of a request to produce a response.
+    /// Defaults to `false`. If you do not return true, `Vec::new()` will be passed to `handle`.
     fn needs_body(&self) -> bool {
         false
     }
+
+    /// Handle a single request. Gets the arguments (like a database connection), the current request,
+    /// and the current body (if `needs_body` returned true) to produce a response.
     async fn handle(&self, args: A, req: Request<Body>, body: Vec<u8>) -> Response<Body>
     where
         A: 'async_trait;

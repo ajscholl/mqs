@@ -42,7 +42,7 @@ use mqs_common::{
         trace_id::{create_trace_id, with_trace_id},
         NewJsonLogger,
     },
-    router::{handler::handle, Router},
+    router::{handle, Router},
 };
 use mqs_server::{
     connection::{init_pool, DbConn, Pool},

@@ -1,4 +1,4 @@
-#![feature(unboxed_closures, fn_traits)]
+#![feature(unboxed_closures, fn_traits, in_band_lifetimes)]
 #![warn(
     rust_2018_idioms,
     future_incompatible,

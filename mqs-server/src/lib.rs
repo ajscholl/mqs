@@ -1,3 +1,4 @@
+#![feature(in_band_lifetimes)]
 #![warn(
     rust_2018_idioms,
     future_incompatible,

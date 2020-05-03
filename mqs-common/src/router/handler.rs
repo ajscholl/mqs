@@ -1,3 +1,4 @@
+use http::version::Version;
 use hyper::{
     header::{HeaderValue, CONNECTION, CONTENT_TYPE, SERVER},
     Body,
@@ -8,6 +9,62 @@ use std::convert::Infallible;
 
 use crate::{read_body, router::Router, status::Status};
 
+/// Handle a single request using the given router.
+///
+/// If the given connection is `None`, an error response is returned.
+/// If more than `max_message_size` bytes are send by the client, an
+/// error response is returned.
+///
+/// ```
+/// use async_trait::async_trait;
+/// use hyper::{Body, Method, Request, Response};
+/// use mqs_common::{
+///     read_body,
+///     router::{handle, Handler, Router},
+///     test::make_runtime,
+/// };
+///
+/// struct IntSource {
+///     int: i32,
+/// }
+///
+/// struct ExampleHandler {}
+///
+/// #[async_trait]
+/// impl Handler<(i32, IntSource)> for ExampleHandler {
+///     async fn handle(&self, args: (i32, IntSource), req: Request<Body>, body: Vec<u8>) -> Response<Body> {
+///         Response::new(Body::from(format!("{} -> {}", args.0, args.1.int)))
+///     }
+/// }
+///
+/// fn main() {
+///     make_runtime().block_on(async {
+///         let router = Router::new_simple(Method::GET, ExampleHandler {});
+///         let mut response = handle(None, IntSource { int: 5 }, &router, 100, Request::new(Body::default()))
+///             .await
+///             .unwrap();
+///         assert_eq!(response.status(), 503);
+///         assert_eq!(
+///             read_body(response.body_mut(), None).await.unwrap().unwrap(),
+///             "{\"error\":\"Service unavailable, try again later\"}".as_bytes()
+///         );
+///         let mut response = handle(
+///             Some(42),
+///             IntSource { int: 5 },
+///             &router,
+///             100,
+///             Request::new(Body::default()),
+///         )
+///         .await
+///         .unwrap();
+///         assert_eq!(response.status(), 200);
+///         assert_eq!(
+///             read_body(response.body_mut(), None).await.unwrap().unwrap(),
+///             "42 -> 5".as_bytes()
+///         );
+///     });
+/// }
+/// ```
 pub async fn handle<T, S>(
     conn: Option<T>,
     source: S,
@@ -15,6 +72,7 @@ pub async fn handle<T, S>(
     max_message_size: usize,
     mut req: Request<Body>,
 ) -> Result<Response<Body>, Infallible> {
+    let version = req.version();
     let mut response = if let Some(conn) = conn {
         let segments = req.uri().path().split("/").into_iter();
         {
@@ -77,9 +135,84 @@ pub async fn handle<T, S>(
         response
     };
     response.headers_mut().insert(SERVER, HeaderValue::from_static("mqs"));
-    // TODO: should we add this header every time or only when seeing it from the client / on HTTP/1.1?
-    response
-        .headers_mut()
-        .insert(CONNECTION, HeaderValue::from_static("keep-alive"));
+    if version <= Version::HTTP_11 {
+        response
+            .headers_mut()
+            .insert(CONNECTION, HeaderValue::from_static("keep-alive"));
+    }
     Ok(response)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{
+        read_body,
+        router::{Handler, Router},
+        test::make_runtime,
+    };
+    use async_trait::async_trait;
+    use hyper::{Body, Method, Request, Response};
+
+    struct EchoHandler {}
+
+    #[async_trait]
+    impl Handler<(i32, ())> for EchoHandler {
+        fn needs_body(&self) -> bool {
+            true
+        }
+
+        async fn handle(&self, args: (i32, ()), _: Request<Body>, body: Vec<u8>) -> Response<Body> {
+            Response::new(Body::from(format!(
+                "{} -> {}",
+                args.0,
+                String::from_utf8(body).unwrap()
+            )))
+        }
+    }
+
+    #[test]
+    fn test_handler() {
+        make_runtime().block_on(async {
+            let router = Router::new_simple(Method::GET, EchoHandler {});
+            let mut response = handle(None, (), &router, 100, Request::new(Body::default()))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 503);
+            assert_eq!(
+                read_body(response.body_mut(), None).await.unwrap().unwrap(),
+                "{\"error\":\"Service unavailable, try again later\"}".as_bytes()
+            );
+            let mut response = handle(Some(42), (), &router, 100, Request::new(Body::default()))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 200);
+            assert_eq!(
+                read_body(response.body_mut(), None).await.unwrap().unwrap(),
+                "42 -> ".as_bytes()
+            );
+            let mut response = handle(Some(42), (), &router, 3, Request::new(Body::from("hello".to_string())))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 413);
+            assert_eq!(
+                read_body(response.body_mut(), None).await.unwrap().unwrap(),
+                "{\"error\":\"Payload too large\"}".as_bytes()
+            );
+            let mut response = handle(
+                Some(42),
+                (),
+                &Router::new(),
+                3,
+                Request::new(Body::from("hello".to_string())),
+            )
+            .await
+            .unwrap();
+            assert_eq!(response.status(), 404);
+            assert_eq!(
+                read_body(response.body_mut(), None).await.unwrap().unwrap(),
+                "{\"error\":\"No handler found for request\"}".as_bytes()
+            );
+        });
+    }
 }
