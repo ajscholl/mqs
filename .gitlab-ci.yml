@@ -21,10 +21,40 @@ test:
      - export PATH="$CARGO_HOME/bin:$RUSTUP_HOME/bin:$PATH"
      - mkdir -p "$CARGO_HOME" "$RUSTUP_HOME"
      - rustup default "$RUST_VERSION"
-     - which cargo
+     - rustup component add rustfmt
      - cargo test --locked
+     - cargo fmt -- --check
   cache:
     key: test
+    paths:
+      - target
+      - usr/local
+
+coverage:
+  image: rust:1.34.0-stretch
+  stage: compile
+  before_script:
+    - mkdir -p "$(pwd)/usr/local/cargo" "$(pwd)/usr/local/rustup"
+    - mv "$(pwd)/usr/local/cargo" /usr/local/cargo
+    - mv "$(pwd)/usr/local/rustup" /usr/local/rustup
+  script:
+     - export CARGO_HOME=/usr/local/cargo
+     - export RUSTUP_HOME=/usr/local/rustup
+     - export PATH="$CARGO_HOME/bin:$RUSTUP_HOME/bin:$PATH"
+     - rustup default "$RUST_VERSION"
+     - rustup toolchain install nightly
+     - cargo install cargo-tarpaulin --version "=0.12.3"
+     - cargo tarpaulin --locked --line --out Html --workspace --verbose
+  after_script:
+    - mv /usr/local/cargo "$(pwd)/usr/local/cargo"
+    - mv /usr/local/rustup "$(pwd)/usr/local/rustup"
+  artifacts:
+    paths:
+      - tarpaulin-report.html
+    expire_in: 1 week
+  coverage: '/(\d+\.\d+)% coverage/'
+  cache:
+    key: coverage
     paths:
       - target
       - usr/local
@@ -38,7 +68,6 @@ compile:
      - export PATH="$CARGO_HOME/bin:$RUSTUP_HOME/bin:$PATH"
      - mkdir -p "$CARGO_HOME" "$RUSTUP_HOME"
      - rustup default "$RUST_VERSION"
-     - which cargo
      - cargo build --locked --release
      - mkdir -p bin
      - cp target/release/mqs bin
@@ -68,7 +97,7 @@ compile:
     - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
     - docker build --tag "$IMAGE_NAME" --file "$DOCKERFILE" --build-arg="app=$APPLICATION" --build-arg="appDir=$APPLICATION_DIR" .
     - docker push "$IMAGE_NAME"
-  dependencies:
+  needs:
     - compile
 
 mqs:image:
