@@ -1,6 +1,6 @@
 use async_trait::async_trait;
-use hyper::{Body, Request, Response};
-use mqs_common::router::Handler;
+use hyper::{header::HeaderName, Body, Request, Response};
+use mqs_common::{get_header, router::Handler};
 
 use crate::{
     models::{message::MessageRepository, queue::QueueRepository},
@@ -27,10 +27,7 @@ impl<R: MessageRepository + QueueRepository, S: Source<R>> Handler<(R, S)> for R
         S: 'async_trait,
     {
         let message_count = {
-            let header_value = req
-                .headers()
-                .get("x-mqs-max-messages")
-                .map_or_else(|| None, |v| v.to_str().map_or_else(|_| None, |s| Some(s)));
+            let header_value = get_header(req.headers(), HeaderName::from_static("x-mqs-max-messages"));
             if let Some(max_messages) = header_value {
                 match max_messages.parse() {
                     Err(_) => Err(()),
@@ -47,10 +44,7 @@ impl<R: MessageRepository + QueueRepository, S: Source<R>> Handler<(R, S)> for R
             }
         };
         let max_wait_time = {
-            let header_value = req
-                .headers()
-                .get("x-mqs-max-wait-time")
-                .map_or_else(|| None, |v| v.to_str().map_or_else(|_| None, |s| Some(s)));
+            let header_value = get_header(req.headers(), HeaderName::from_static("x-mqs-max-wait-time"));
             if let Some(max_wait_time) = header_value {
                 match max_wait_time.parse() {
                     Err(_) => Err(()),

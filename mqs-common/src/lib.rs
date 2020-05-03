@@ -21,7 +21,9 @@ use hyper::{
     body::{Buf, HttpBody},
     header::HeaderName,
     Body,
+    HeaderMap,
 };
+use uuid::Uuid;
 
 pub mod logger;
 pub mod multipart;
@@ -42,6 +44,17 @@ impl TraceIdHeader {
     pub fn upper(&self) -> String {
         self.name().as_str().to_uppercase()
     }
+
+    pub fn get(&self, headers: &HeaderMap) -> Option<Uuid> {
+        get_header(headers, self.name())
+            .map_or_else(|| None, |s| Uuid::parse_str(s).map_or_else(|_| None, |id| Some(id)))
+    }
+}
+
+pub fn get_header(headers: &HeaderMap, header: HeaderName) -> Option<&str> {
+    headers
+        .get(header)
+        .map_or_else(|| None, |v| v.to_str().map_or_else(|_| None, |s| Some(s)))
 }
 
 #[derive(Serialize, Deserialize, Debug)]

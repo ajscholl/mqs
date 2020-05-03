@@ -2,7 +2,7 @@ use hyper::{
     header::{HeaderValue, CONTENT_ENCODING, CONTENT_TYPE},
     HeaderMap,
 };
-use mqs_common::{multipart, status::Status, DEFAULT_CONTENT_TYPE, TRACE_ID_HEADER};
+use mqs_common::{get_header, multipart, status::Status, DEFAULT_CONTENT_TYPE, TRACE_ID_HEADER};
 use uuid::Uuid;
 
 use crate::{
@@ -59,13 +59,8 @@ pub(crate) async fn publish_messages<R: QueueRepository + MessageRepository>(
             content_type:     message_headers
                 .get(CONTENT_TYPE)
                 .map_or_else(|| DEFAULT_CONTENT_TYPE, |v| v.to_str().unwrap_or(DEFAULT_CONTENT_TYPE)),
-            content_encoding: message_headers
-                .get(CONTENT_ENCODING)
-                .map_or_else(|| None, |v| v.to_str().map_or_else(|_| None, |s| Some(s))),
-            trace_id:         message_headers
-                .get(TRACE_ID_HEADER.name())
-                .map_or_else(|| None, |v| v.to_str().map_or_else(|_| None, |s| Some(s)))
-                .map_or_else(|| None, |s| Uuid::parse_str(s).map_or_else(|_| None, |id| Some(id))),
+            content_encoding: get_header(&message_headers, CONTENT_ENCODING),
+            trace_id:         TRACE_ID_HEADER.get(&message_headers),
         }) {
             Err(err) => {
                 error!("Failed to insert new message into queue {}: {}", &queue_name, err);

@@ -10,6 +10,7 @@
     variant_size_differences
 )]
 #![cfg_attr(test, deny(warnings))]
+
 //! Client library for mqs servers
 //!
 //! # Overview
@@ -519,10 +520,7 @@ impl Service {
         let content_encoding = headers
             .get(CONTENT_ENCODING)
             .map_or_else(|| None, |h| h.to_str().map_or_else(|_| None, |s| Some(s.to_string())));
-        let trace_id = headers
-            .get(TRACE_ID_HEADER.name())
-            .map_or_else(|| None, |v| v.to_str().map_or_else(|_| None, |s| Some(s)))
-            .map_or_else(|| None, |s| Uuid::parse_str(s).map_or_else(|_| None, |id| Some(id)));
+        let trace_id = TRACE_ID_HEADER.get(&headers);
         let content = get_body()?;
         Ok(MessageResponse {
             message_id,
@@ -772,5 +770,103 @@ impl Service {
         } else {
             Err(ClientError::TooLargeResponse)
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use hyper::Uri;
+    use mqs_common::test::make_runtime;
+    use std::io::ErrorKind;
+
+    #[test]
+    fn encode_publishable_message() {
+        let msg = PublishableMessage {
+            trace_id:         None,
+            content_encoding: None,
+            content_type:     "type",
+            message:          vec![1, 2, 3],
+        };
+        assert_eq!(
+            msg.encode(),
+            (
+                {
+                    let mut headers = HeaderMap::new();
+                    headers.insert(CONTENT_TYPE, HeaderValue::from_static("type"));
+                    headers
+                },
+                vec![1, 2, 3]
+            )
+        );
+        let msg = PublishableMessage {
+            trace_id:         Some(Uuid::parse_str("96a372de-2db0-405b-a49e-fbcddcabefdb").unwrap()),
+            content_encoding: Some("encoding"),
+            content_type:     "type",
+            message:          vec![4, 5, 6],
+        };
+        assert_eq!(
+            msg.encode(),
+            (
+                {
+                    let mut headers = HeaderMap::new();
+                    headers.insert(CONTENT_TYPE, HeaderValue::from_static("type"));
+                    headers.insert(CONTENT_ENCODING, HeaderValue::from_static("encoding"));
+                    headers.insert(
+                        TRACE_ID_HEADER.name(),
+                        HeaderValue::from_static("96a372de-2db0-405b-a49e-fbcddcabefdb"),
+                    );
+                    headers
+                },
+                vec![4, 5, 6]
+            )
+        );
+    }
+
+    #[test]
+    fn test_errors() {
+        // let invalid_method = Method::from_bytes(&[]).unwrap_err();
+        let client = hyper::Client::new();
+        let mut rt = make_runtime();
+        let hyper_error = rt.block_on(async {
+            client
+                .get("http://localhost:60000/non-existent".parse().unwrap())
+                .await
+                .unwrap_err()
+        });
+        let err: ClientError = ClientError::from(hyper_error);
+        assert_eq!(format!("{}", err), "HyperError(hyper::Error(Connect, ConnectError(\"tcp connect error\", Os { code: 111, kind: ConnectionRefused, message: \"Connection refused\" })))");
+
+        let invalid_uri_error = "".parse::<Uri>().unwrap_err();
+        let err = ClientError::from(invalid_uri_error);
+        assert_eq!(format!("{}", err), "InvalidUri(InvalidUri(Empty))");
+
+        let std_err = std::io::Error::from(ErrorKind::NotConnected);
+        let err = ClientError::from(std_err);
+        assert_eq!(format!("{}", err), "IoError(Kind(NotConnected))");
+
+        let serde_error = serde_json::from_str::<String>("").unwrap_err();
+        let err = ClientError::from(serde_error);
+        assert_eq!(
+            format!("{}", err),
+            "ParseError(Error(\"EOF while parsing a value\", line: 1, column: 0))"
+        );
+
+        let invalid_header_error = HeaderValue::from_str("\0").unwrap_err();
+        let err = ClientError::from(invalid_header_error);
+        assert_eq!(format!("{}", err), "InvalidHeaderValue(InvalidHeaderValue)");
+
+        let parse_error = multipart::ParseError::InvalidChunk;
+        let err = ClientError::from(parse_error);
+        assert_eq!(format!("{}", err), "MultipartParseError(InvalidChunk)");
+    }
+
+    #[test]
+    fn set_max_body_size() {
+        let mut service = Service::new("http://localhost:7843");
+        service.set_max_body_size(None);
+        assert_eq!(service.max_body_size, None);
+        service.set_max_body_size(Some(64 * 1024));
+        assert_eq!(service.max_body_size, Some(64 * 1024));
     }
 }

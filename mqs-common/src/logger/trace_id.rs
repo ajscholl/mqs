@@ -20,25 +20,7 @@ pub async fn with_trace_id<F: Future>(id: Uuid, f: F) -> F::Output {
 }
 
 pub fn create_trace_id(req: &Request<Body>) -> Uuid {
-    if let Some(trace_id) = req.headers().get(TRACE_ID_HEADER.name()) {
-        if let Ok(s) = trace_id.to_str() {
-            if let Ok(id) = Uuid::parse_str(s) {
-                return id;
-            } else {
-                warn!(
-                    "Found {} header with value '{}', but failed to parse id",
-                    TRACE_ID_HEADER.upper(),
-                    s
-                );
-            }
-        } else {
-            warn!("Failed to convert {} header to string", TRACE_ID_HEADER.upper());
-        }
-    } else {
-        debug!("No {} header found, generating new id", TRACE_ID_HEADER.upper());
-    }
-
-    Uuid::new_v4()
+    TRACE_ID_HEADER.get(req.headers()).unwrap_or_else(|| Uuid::new_v4())
 }
 
 #[cfg(test)]
