@@ -1,4 +1,14 @@
 #![feature(unboxed_closures, fn_traits)]
+#![warn(
+    rust_2018_idioms,
+    future_incompatible,
+    missing_copy_implementations,
+    trivial_numeric_casts,
+    unsafe_code,
+    unused,
+    unused_qualifications,
+    variant_size_differences
+)]
 
 #[macro_use]
 extern crate log;
@@ -21,6 +31,7 @@ pub mod status;
 pub const DEFAULT_CONTENT_TYPE: &'static str = "application/octet-stream";
 pub const TRACE_ID_HEADER: TraceIdHeader = TraceIdHeader {};
 
+#[derive(Clone, Copy)]
 pub struct TraceIdHeader {}
 
 impl TraceIdHeader {
@@ -59,7 +70,7 @@ pub struct QueueRedrivePolicy {
     pub dead_letter_queue: String,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub struct QueueStatus {
     pub messages:           i64,
     pub visible_messages:   i64,

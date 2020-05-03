@@ -25,7 +25,7 @@ pub(crate) mod test {
         routes::messages::Source,
     };
     use chrono::Utc;
-    use diesel::{result::Error, QueryResult};
+    use diesel::QueryResult;
     use serde::{de::StdError, export::Formatter};
     use sha2::{digest::Input, Digest, Sha256};
     use std::{
@@ -78,40 +78,26 @@ pub(crate) mod test {
             id
         }
 
-        fn queues(&self) -> QueryResult<&HashMap<String, Queue>> {
-            match unsafe { self.queues.as_ptr().as_ref() } {
-                None => Err(Error::DeserializationError(Box::new(TestError {
-                    message: "Failed to open cell",
-                }))),
-                Some(queues) => Ok(queues),
-            }
+        fn with_queues<R, F: FnOnce(&HashMap<String, Queue>) -> R>(&self, f: F) -> R {
+            self.with_queues_mut(|queues| f(queues))
         }
 
-        fn queues_mut(&self) -> QueryResult<&mut HashMap<String, Queue>> {
-            match unsafe { self.queues.as_ptr().as_mut() } {
-                None => Err(Error::DeserializationError(Box::new(TestError {
-                    message: "Failed to open cell",
-                }))),
-                Some(queues) => Ok(queues),
-            }
+        fn with_queues_mut<R, F: FnOnce(&mut HashMap<String, Queue>) -> R>(&self, f: F) -> R {
+            let mut queues = self.queues.replace(HashMap::new());
+            let r = f(&mut queues);
+            self.queues.replace(queues);
+            r
         }
 
-        fn messages(&self) -> QueryResult<&HashMap<Uuid, Message>> {
-            match unsafe { self.messages.as_ptr().as_ref() } {
-                None => Err(Error::DeserializationError(Box::new(TestError {
-                    message: "Failed to open cell",
-                }))),
-                Some(messages) => Ok(messages),
-            }
+        fn with_messages<R, F: FnOnce(&HashMap<Uuid, Message>) -> R>(&self, f: F) -> R {
+            self.with_messages_mut(|messages| f(messages))
         }
 
-        fn messages_mut(&self) -> QueryResult<&mut HashMap<Uuid, Message>> {
-            match unsafe { self.messages.as_ptr().as_mut() } {
-                None => Err(Error::DeserializationError(Box::new(TestError {
-                    message: "Failed to open cell",
-                }))),
-                Some(messages) => Ok(messages),
-            }
+        fn with_messages_mut<R, F: FnOnce(&mut HashMap<Uuid, Message>) -> R>(&self, f: F) -> R {
+            let mut messages = self.messages.replace(HashMap::new());
+            let r = f(&mut messages);
+            self.messages.replace(messages);
+            r
         }
     }
 
@@ -122,22 +108,30 @@ pub(crate) mod test {
     }
 
     impl MessageRepository for TestRepo {
-        fn insert_message(&self, queue: &Queue, input: &MessageInput) -> QueryResult<bool> {
+        fn insert_message(&self, queue: &Queue, input: &MessageInput<'_>) -> QueryResult<bool> {
+            let mut found = false;
             let hash = if queue.content_based_deduplication {
                 let mut digest = Sha256::default();
                 Input::input(&mut digest, input.payload);
                 let result = base64::encode(digest.result().as_slice());
-                for message in self.messages()?.values() {
-                    if let Some(msg_hash) = &message.hash {
-                        if msg_hash == &result {
-                            return Ok(false);
+                self.with_messages(|messages| {
+                    for message in messages.values() {
+                        if let Some(msg_hash) = &message.hash {
+                            if msg_hash == &result {
+                                found = true;
+                                return None;
+                            }
                         }
                     }
-                }
-                Some(result)
+
+                    Some(result)
+                })
             } else {
                 None
             };
+            if found {
+                return Ok(false);
+            }
             let now = Utc::now();
             let message = Message {
                 id: Uuid::new_v4(),
@@ -151,25 +145,27 @@ pub(crate) mod test {
                 created_at: now.naive_utc(),
                 trace_id: None,
             };
-            self.messages_mut()?.insert(message.id.clone(), message);
+            self.with_messages_mut(|messages| messages.insert(message.id.clone(), message));
 
             Ok(true)
         }
 
         fn get_message_from_queue(&self, queue: &Queue, count: i64) -> QueryResult<Vec<Message>> {
-            let mut result = Vec::with_capacity(count as usize);
+            let mut result: Vec<Message> = Vec::with_capacity(count as usize);
             let now = Utc::now();
             let naive_now = now.naive_utc();
 
-            for message in self.messages_mut()?.values_mut() {
-                if message.visible_since.gt(&naive_now) || &message.queue != &queue.name {
-                    continue;
-                }
+            self.with_messages_mut(|messages| {
+                for message in messages.values_mut() {
+                    if message.visible_since.gt(&naive_now) || &message.queue != &queue.name {
+                        continue;
+                    }
 
-                message.receives += 1;
-                message.visible_since = add_pg_interval(&now, &queue.visibility_timeout).naive_utc();
-                result.push(message.clone());
-            }
+                    message.receives += 1;
+                    message.visible_since = add_pg_interval(&now, &queue.visibility_timeout).naive_utc();
+                    result.push(message.clone());
+                }
+            });
 
             Ok(result)
         }
@@ -177,21 +173,23 @@ pub(crate) mod test {
         fn move_message_to_queue(&self, ids: Vec<Uuid>, new_queue: &str) -> QueryResult<usize> {
             let mut modified = 0;
 
-            for id in ids {
-                match self.messages_mut()?.get_mut(&id) {
-                    None => {},
-                    Some(msg) => {
-                        msg.queue = new_queue.to_string();
-                        modified += 1;
-                    },
+            self.with_messages_mut(|messages| {
+                for id in ids {
+                    match messages.get_mut(&id) {
+                        None => {},
+                        Some(msg) => {
+                            msg.queue = new_queue.to_string();
+                            modified += 1;
+                        },
+                    }
                 }
-            }
+            });
 
             Ok(modified)
         }
 
         fn delete_message_by_id(&self, id: Uuid) -> QueryResult<bool> {
-            Ok(self.messages_mut()?.remove(&id).is_some())
+            Ok(self.with_messages_mut(|messages| messages.remove(&id).is_some()))
         }
 
         fn delete_messages_by_ids(&self, ids: Vec<Uuid>) -> QueryResult<usize> {
@@ -209,15 +207,12 @@ pub(crate) mod test {
 
     impl QueueSource for TestRepo {
         fn find_by_name(&self, name: &str) -> QueryResult<Option<Queue>> {
-            Ok(match self.queues()?.get(&name.to_string()) {
-                None => None,
-                Some(queue) => Some(queue.clone()),
-            })
+            Ok(self.with_queues(|queues| queues.get(&name.to_string()).map(|queue| queue.clone())))
         }
     }
 
     impl QueueRepository for TestRepo {
-        fn insert_queue(&self, queue: &QueueInput) -> QueryResult<Option<Queue>> {
+        fn insert_queue(&self, queue: &QueueInput<'_>) -> QueryResult<Option<Queue>> {
             if self.find_by_name(queue.name)?.is_some() {
                 return Ok(None);
             }
@@ -234,39 +229,43 @@ pub(crate) mod test {
                 created_at:                  now.naive_utc(),
                 updated_at:                  now.naive_utc(),
             };
-            self.queues_mut()?.insert(queue.name.to_string(), queue.clone());
+            self.with_queues_mut(|queues| {
+                queues.insert(queue.name.to_string(), queue.clone());
+            });
 
             Ok(Some(queue))
         }
 
         fn count_queues(&self) -> QueryResult<i64> {
-            Ok(self.queues()?.len() as i64)
+            Ok(self.with_queues(|queues| queues.len() as i64))
         }
 
         fn describe_queue(&self, name: &str) -> QueryResult<Option<QueueDescription>> {
             let queue = self.find_by_name(name)?;
             if let Some(queue) = queue {
-                let mut messages = 0;
+                let mut messages_count = 0;
                 let mut visible_messages = 0;
                 let mut oldest_message_age = 0;
                 let now = Utc::now().naive_utc();
 
-                for message in self.messages()?.values() {
-                    if &message.queue != &queue.name {
-                        continue;
+                self.with_messages(|messages| {
+                    for message in messages.values() {
+                        if &message.queue != &queue.name {
+                            continue;
+                        }
+
+                        messages_count += 1;
+                        visible_messages += if message.visible_since.le(&now) { 1 } else { 0 };
+                        oldest_message_age = oldest_message_age.max(now.sub(message.created_at).num_seconds());
                     }
 
-                    messages += 1;
-                    visible_messages += if message.visible_since.le(&now) { 1 } else { 0 };
-                    oldest_message_age = oldest_message_age.max(now.sub(message.created_at).num_seconds());
-                }
-
-                Ok(Some(QueueDescription {
-                    queue,
-                    messages,
-                    visible_messages,
-                    oldest_message_age,
-                }))
+                    Ok(Some(QueueDescription {
+                        queue,
+                        messages: messages_count,
+                        visible_messages,
+                        oldest_message_age,
+                    }))
+                })
             } else {
                 Ok(None)
             }
@@ -274,25 +273,27 @@ pub(crate) mod test {
 
         fn list_queues(&self, offset: Option<i64>, limit: Option<i64>) -> QueryResult<Vec<Queue>> {
             let mut skip = offset.unwrap_or(0);
-            let max = limit.unwrap_or(self.queues()?.len() as i64) as usize;
+            let max = limit.unwrap_or(self.with_queues(|queues| queues.len() as i64)) as usize;
             let mut result = Vec::with_capacity(max);
 
-            for queue in self.queues()?.values() {
-                if skip > 0 {
-                    skip -= 0;
-                    continue;
-                }
+            self.with_queues(|queues| {
+                for queue in queues.values() {
+                    if skip > 0 {
+                        skip -= 0;
+                        continue;
+                    }
 
-                result.push(queue.clone());
-                if result.len() == max {
-                    break;
+                    result.push(queue.clone());
+                    if result.len() == max {
+                        break;
+                    }
                 }
-            }
+            });
 
             Ok(result)
         }
 
-        fn update_queue(&self, queue: &QueueInput) -> QueryResult<Option<Queue>> {
+        fn update_queue(&self, queue: &QueueInput<'_>) -> QueryResult<Option<Queue>> {
             let old = self.find_by_name(queue.name)?;
             if let Some(old) = old {
                 let queue = Queue {
@@ -307,7 +308,9 @@ pub(crate) mod test {
                     created_at:                  old.created_at,
                     updated_at:                  Utc::now().naive_utc(),
                 };
-                self.queues_mut()?.insert(queue.name.to_string(), queue.clone());
+                self.with_queues_mut(|queues| {
+                    queues.insert(queue.name.to_string(), queue.clone());
+                });
 
                 Ok(Some(queue))
             } else {
@@ -316,7 +319,7 @@ pub(crate) mod test {
         }
 
         fn delete_queue_by_name(&self, name: &str) -> QueryResult<Option<Queue>> {
-            Ok(self.queues_mut()?.remove(name))
+            Ok(self.with_queues_mut(|queues| queues.remove(name)))
         }
     }
 
@@ -361,7 +364,7 @@ pub(crate) mod test {
     }
 
     impl<R: QueueRepository + Sync> QueueRepository for Arc<R> {
-        fn insert_queue(&self, queue: &QueueInput) -> QueryResult<Option<Queue>> {
+        fn insert_queue(&self, queue: &QueueInput<'_>) -> QueryResult<Option<Queue>> {
             self.deref().insert_queue(queue)
         }
 
@@ -377,7 +380,7 @@ pub(crate) mod test {
             self.deref().list_queues(offset, limit)
         }
 
-        fn update_queue(&self, queue: &QueueInput) -> QueryResult<Option<Queue>> {
+        fn update_queue(&self, queue: &QueueInput<'_>) -> QueryResult<Option<Queue>> {
             self.deref().update_queue(queue)
         }
 
@@ -387,7 +390,7 @@ pub(crate) mod test {
     }
 
     impl<R: QueueRepository> QueueRepository for Mutex<R> {
-        fn insert_queue(&self, queue: &QueueInput) -> QueryResult<Option<Queue>> {
+        fn insert_queue(&self, queue: &QueueInput<'_>) -> QueryResult<Option<Queue>> {
             self.lock().unwrap().insert_queue(queue)
         }
 
@@ -403,7 +406,7 @@ pub(crate) mod test {
             self.lock().unwrap().list_queues(offset, limit)
         }
 
-        fn update_queue(&self, queue: &QueueInput) -> QueryResult<Option<Queue>> {
+        fn update_queue(&self, queue: &QueueInput<'_>) -> QueryResult<Option<Queue>> {
             self.lock().unwrap().update_queue(queue)
         }
 
@@ -413,7 +416,7 @@ pub(crate) mod test {
     }
 
     impl<R: MessageRepository + Sync> MessageRepository for Arc<R> {
-        fn insert_message(&self, queue: &Queue, input: &MessageInput) -> QueryResult<bool> {
+        fn insert_message(&self, queue: &Queue, input: &MessageInput<'_>) -> QueryResult<bool> {
             self.deref().insert_message(queue, input)
         }
 
@@ -435,7 +438,7 @@ pub(crate) mod test {
     }
 
     impl<R: MessageRepository> MessageRepository for Mutex<R> {
-        fn insert_message(&self, queue: &Queue, input: &MessageInput) -> QueryResult<bool> {
+        fn insert_message(&self, queue: &Queue, input: &MessageInput<'_>) -> QueryResult<bool> {
             self.lock().unwrap().insert_message(queue, input)
         }
 

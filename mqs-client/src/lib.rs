@@ -1,3 +1,14 @@
+#![warn(
+    rust_2018_idioms,
+    future_incompatible,
+    missing_copy_implementations,
+    trivial_numeric_casts,
+    unsafe_code,
+    unused,
+    unused_qualifications,
+    variant_size_differences
+)]
+
 use hyper::{
     client::HttpConnector,
     header::{HeaderName, HeaderValue, CONNECTION, CONTENT_ENCODING, CONTENT_TYPE},

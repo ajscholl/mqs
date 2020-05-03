@@ -8,7 +8,7 @@ use crate::{
     routes::MqsResponse,
 };
 
-pub fn new_queue<R: QueueRepository>(
+pub(crate) fn new_queue<R: QueueRepository>(
     repo: R,
     queue_name: &str,
     params: Result<QueueConfig, serde_json::Error>,
@@ -41,7 +41,7 @@ pub fn new_queue<R: QueueRepository>(
     }
 }
 
-pub fn update_queue<R: QueueRepository>(
+pub(crate) fn update_queue<R: QueueRepository>(
     repo: R,
     queue_name: &str,
     params: Result<QueueConfig, serde_json::Error>,
@@ -74,7 +74,7 @@ pub fn update_queue<R: QueueRepository>(
     }
 }
 
-pub fn delete_queue<R: QueueRepository>(repo: R, queue_name: &str) -> MqsResponse {
+pub(crate) fn delete_queue<R: QueueRepository>(repo: R, queue_name: &str) -> MqsResponse {
     info!("Deleting queue {}", queue_name);
     let deleted = repo.delete_queue_by_name(queue_name);
     match deleted {
@@ -93,14 +93,14 @@ pub fn delete_queue<R: QueueRepository>(repo: R, queue_name: &str) -> MqsRespons
     }
 }
 
-#[derive(Debug)]
-pub struct QueuesRange {
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct QueuesRange {
     offset: Option<i64>,
     limit:  Option<i64>,
 }
 
 impl QueuesRange {
-    pub fn from_hyper(req: hyper::Request<Body>) -> Result<QueuesRange, String> {
+    pub(crate) fn from_hyper(req: hyper::Request<Body>) -> Result<QueuesRange, String> {
         let query = req.uri().query().unwrap_or("");
         let mut query_params = HashMap::new();
         for param in query.split("&").into_iter() {
@@ -139,7 +139,7 @@ fn list_queues_and_count<R: QueueRepository>(repo: R, range: &QueuesRange) -> Qu
     })
 }
 
-pub fn list_queues<R: QueueRepository>(repo: R, range: Result<QueuesRange, String>) -> MqsResponse {
+pub(crate) fn list_queues<R: QueueRepository>(repo: R, range: Result<QueuesRange, String>) -> MqsResponse {
     match range {
         Err(err) => MqsResponse::error_owned(err),
         Ok(range) => match list_queues_and_count(repo, &range) {
@@ -156,7 +156,7 @@ pub fn list_queues<R: QueueRepository>(repo: R, range: Result<QueuesRange, Strin
     }
 }
 
-pub fn describe_queue<R: QueueRepository>(repo: R, queue_name: &str) -> MqsResponse {
+pub(crate) fn describe_queue<R: QueueRepository>(repo: R, queue_name: &str) -> MqsResponse {
     match repo.describe_queue(queue_name) {
         Err(err) => {
             error!("Failed to describe queue {}: {}", queue_name, err);

@@ -1,3 +1,14 @@
+#![warn(
+    rust_2018_idioms,
+    future_incompatible,
+    missing_copy_implementations,
+    trivial_numeric_casts,
+    unsafe_code,
+    unused,
+    unused_qualifications,
+    variant_size_differences
+)]
+
 use chrono::Utc;
 use std::{
     env,
@@ -11,7 +22,7 @@ use uuid::Uuid;
 use mqs_client::{ClientError, PublishableMessage, Service};
 use mqs_common::QueueConfig;
 
-type AnyError = Box<dyn std::error::Error + Send + Sync>;
+type AnyError = Box<dyn Error + Send + Sync>;
 
 const NUM_THREADS: usize = 25;
 

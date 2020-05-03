@@ -76,7 +76,7 @@ pub fn is_multipart(content_type: &str) -> Option<String> {
     None
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum ParseError {
     InvalidChunk,
     InvalidHeaderName,

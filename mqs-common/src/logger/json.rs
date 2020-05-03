@@ -60,11 +60,11 @@ impl<W: Write> Logger<W> {
 }
 
 impl<W: Write + Send> Log for Logger<W> {
-    fn enabled(&self, metadata: &Metadata) -> bool {
+    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
         metadata.level() <= self.level
     }
 
-    fn log(&self, record: &Record) {
+    fn log(&self, record: &Record<'_>) {
         if self.enabled(record.metadata()) {
             let msg = LogMessage::build(record);
             if let Ok(mut line) = serde_json::to_vec(&msg) {
@@ -112,7 +112,7 @@ mod test {
             assert_eq!(lines.len(), expected_messages.len() + 1); // final line ends with '\n', so final element is ""
             assert_eq!(lines[lines.len() - 1], ""); // final line should be empty
             for i in 0..expected_messages.len() {
-                let parsed: LogMessage = serde_json::from_str(lines[i]).unwrap();
+                let parsed: LogMessage<'_> = serde_json::from_str(lines[i]).unwrap();
                 assert!(parsed.timestamp.ge(&start_time));
                 start_time = parsed.timestamp.clone(); // time only moves forward
                 assert_eq!(parsed, LogMessage {

@@ -10,6 +10,7 @@ use std::{
 pub mod json;
 pub mod trace_id;
 
+#[derive(Clone, Copy)]
 pub struct NewJsonLogger {
     default_log_level: Level,
 }

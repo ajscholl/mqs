@@ -60,7 +60,7 @@ pub(crate) fn add_pg_interval(time: &DateTime<Utc>, offset: &PgInterval) -> Date
 }
 
 pub trait MessageRepository: Send {
-    fn insert_message(&self, queue: &Queue, input: &MessageInput) -> QueryResult<bool>;
+    fn insert_message(&self, queue: &Queue, input: &MessageInput<'_>) -> QueryResult<bool>;
     fn get_message_from_queue(&self, queue: &Queue, count: i64) -> QueryResult<Vec<Message>>;
     fn move_message_to_queue(&self, ids: Vec<Uuid>, new_queue: &str) -> QueryResult<usize>;
     fn delete_message_by_id(&self, id: Uuid) -> QueryResult<bool>;
@@ -68,7 +68,7 @@ pub trait MessageRepository: Send {
 }
 
 impl MessageRepository for PgRepository {
-    fn insert_message(&self, queue: &Queue, input: &MessageInput) -> QueryResult<bool> {
+    fn insert_message(&self, queue: &Queue, input: &MessageInput<'_>) -> QueryResult<bool> {
         let now = Utc::now();
         let visible_since = add_pg_interval(&now, &queue.message_delay);
         let id = Uuid::new_v4();
@@ -187,7 +187,7 @@ impl<'a> MessageIdsForFetch<'a> {
 }
 
 impl<'a> QueryFragment<Pg> for MessageIdsForFetch<'a> {
-    fn walk_ast(&self, mut out: AstPass<Pg>) -> QueryResult<()> {
+    fn walk_ast(&self, mut out: AstPass<'_, Pg>) -> QueryResult<()> {
         // select all elements which are currently visible, take the first elements visible
         // and limit to the maximum number of elements we want to process.
         // skip any locked elements and lock our elements for update.
@@ -240,7 +240,7 @@ where
     F: QueryFragment<DB>,
     V: QueryFragment<DB>,
 {
-    fn walk_ast(&self, mut out: AstPass<DB>) -> QueryResult<()> {
+    fn walk_ast(&self, mut out: AstPass<'_, DB>) -> QueryResult<()> {
         self.field.walk_ast(out.reborrow())?;
         out.push_sql(" IN ");
         self.values.walk_ast(out.reborrow())?;

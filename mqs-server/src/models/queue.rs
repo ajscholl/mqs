@@ -171,11 +171,11 @@ pub trait QueueSource: Send {
 }
 
 pub trait QueueRepository: QueueSource {
-    fn insert_queue(&self, queue: &QueueInput) -> QueryResult<Option<Queue>>;
+    fn insert_queue(&self, queue: &QueueInput<'_>) -> QueryResult<Option<Queue>>;
     fn count_queues(&self) -> QueryResult<i64>;
     fn describe_queue(&self, name: &str) -> QueryResult<Option<QueueDescription>>;
     fn list_queues(&self, offset: Option<i64>, limit: Option<i64>) -> QueryResult<Vec<Queue>>;
-    fn update_queue(&self, queue: &QueueInput) -> QueryResult<Option<Queue>>;
+    fn update_queue(&self, queue: &QueueInput<'_>) -> QueryResult<Option<Queue>>;
     fn delete_queue_by_name(&self, name: &str) -> QueryResult<Option<Queue>>;
 }
 
@@ -189,7 +189,7 @@ impl QueueSource for PgRepository {
 }
 
 impl QueueRepository for PgRepository {
-    fn insert_queue(&self, queue: &QueueInput) -> QueryResult<Option<Queue>> {
+    fn insert_queue(&self, queue: &QueueInput<'_>) -> QueryResult<Option<Queue>> {
         let now = Utc::now();
         let result = diesel::dsl::insert_into(queues::table)
             .values(NewQueue {
@@ -274,7 +274,7 @@ impl QueueRepository for PgRepository {
         }
     }
 
-    fn update_queue(&self, queue: &QueueInput) -> QueryResult<Option<Queue>> {
+    fn update_queue(&self, queue: &QueueInput<'_>) -> QueryResult<Option<Queue>> {
         diesel::dsl::update(queues::table.filter(queues::name.eq(queue.name)))
             .set((
                 queues::max_receives.eq(queue.max_receives),

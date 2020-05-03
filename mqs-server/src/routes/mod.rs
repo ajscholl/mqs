@@ -11,36 +11,36 @@ use crate::models::message::Message;
 pub mod messages;
 pub mod queues;
 
-#[derive(Serialize, Debug)]
-pub struct ErrorResponse<'a> {
+#[derive(Serialize, Debug, Clone, Copy)]
+pub(crate) struct ErrorResponse<'a> {
     error: &'a str,
 }
 
 #[derive(Debug)]
-pub enum MqsResponse {
+pub(crate) enum MqsResponse {
     StatusResponse(Status),
     JsonResponse(Status, String),
     MessageResponse(Status, Vec<Message>),
 }
 
 impl MqsResponse {
-    pub fn status(status: Status) -> Self {
+    pub(crate) fn status(status: Status) -> Self {
         MqsResponse::StatusResponse(status)
     }
 
-    pub fn error_static(error: &'static str) -> Self {
+    pub(crate) fn error_static(error: &'static str) -> Self {
         Self::status_json(Status::BadRequest, &ErrorResponse { error })
     }
 
-    pub fn error_owned(error: String) -> Self {
+    pub(crate) fn error_owned(error: String) -> Self {
         Self::status_json(Status::BadRequest, &ErrorResponse { error: &error })
     }
 
-    pub fn json<T: Serialize>(body: &T) -> Self {
+    pub(crate) fn json<T: Serialize>(body: &T) -> Self {
         Self::status_json(Status::Ok, body)
     }
 
-    pub fn status_json<T: Serialize>(status: Status, body: &T) -> Self {
+    pub(crate) fn status_json<T: Serialize>(status: Status, body: &T) -> Self {
         match serde_json::to_string(body) {
             Err(err) => {
                 error!("Failed to serialize json response: {}", err);
@@ -51,11 +51,11 @@ impl MqsResponse {
         }
     }
 
-    pub fn messages(messages: Vec<Message>) -> Self {
+    pub(crate) fn messages(messages: Vec<Message>) -> Self {
         MqsResponse::MessageResponse(Status::Ok, messages)
     }
 
-    pub fn into_response(self) -> hyper::Response<Body> {
+    pub(crate) fn into_response(self) -> hyper::Response<Body> {
         match self {
             MqsResponse::StatusResponse(status) => {
                 let mut res = hyper::Response::new(Body::default());

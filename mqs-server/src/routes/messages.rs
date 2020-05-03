@@ -20,7 +20,7 @@ fn boundary_from_headers(headers: &HeaderMap<HeaderValue>) -> Option<String> {
     multipart::is_multipart(content_type)
 }
 
-pub async fn publish_messages<R: QueueRepository + MessageRepository>(
+pub(crate) async fn publish_messages<R: QueueRepository + MessageRepository>(
     repo: R,
     queue_name: &String,
     message_content: &[u8],
@@ -89,14 +89,16 @@ pub async fn publish_messages<R: QueueRepository + MessageRepository>(
     }
 }
 
-pub struct MessageCount(pub i64);
-pub struct MaxWaitTime(pub u64);
+#[derive(Clone, Copy)]
+pub(crate) struct MessageCount(pub(crate) i64);
+#[derive(Clone, Copy)]
+pub(crate) struct MaxWaitTime(pub(crate) u64);
 
 pub trait Source<R>: Send {
     fn get(&self) -> Option<R>;
 }
 
-pub async fn receive_messages<R: QueueRepository + MessageRepository, S: Source<R>>(
+pub(crate) async fn receive_messages<R: QueueRepository + MessageRepository, S: Source<R>>(
     repo: R,
     repo_source: S,
     queue_name: &str,
@@ -134,7 +136,7 @@ pub async fn receive_messages<R: QueueRepository + MessageRepository, S: Source<
             return MqsResponse::status(Status::InternalServerError);
         },
     };
-    std::mem::drop(repo);
+    drop(repo);
     if let Some(wait_time) = wait_time {
         if messages.is_empty() && MESSAGE_WAIT_QUEUE.wait(&queue, wait_time.0).await {
             match repo_source.get() {
@@ -160,7 +162,7 @@ pub async fn receive_messages<R: QueueRepository + MessageRepository, S: Source<
     }
 }
 
-pub fn delete_message<R: MessageRepository>(repo: R, message_id: &str) -> MqsResponse {
+pub(crate) fn delete_message<R: MessageRepository>(repo: R, message_id: &str) -> MqsResponse {
     match Uuid::parse_str(message_id) {
         Err(_) => MqsResponse::error_static("Message ID needs to be a UUID"),
         Ok(id) => {

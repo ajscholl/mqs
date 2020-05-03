@@ -10,18 +10,18 @@ use crate::models::queue::Queue;
 
 type MessageWaitQueueMap = HashMap<String, HashMap<Uuid, Sender<()>>>;
 
-pub struct MessageWaitQueue {
+pub(crate) struct MessageWaitQueue {
     wait_queue: Mutex<MessageWaitQueueMap>,
 }
 
 impl MessageWaitQueue {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         MessageWaitQueue {
             wait_queue: Mutex::new(HashMap::new()),
         }
     }
 
-    pub async fn wait(&self, queue: &Queue, max_wait_time: u64) -> bool {
+    pub(crate) async fn wait(&self, queue: &Queue, max_wait_time: u64) -> bool {
         let (tx, rx) = oneshot::channel();
         let queue_name = queue.name.to_string();
         let id = Uuid::new_v4();
@@ -84,7 +84,7 @@ impl MessageWaitQueue {
         found
     }
 
-    pub async fn signal(&self, queue: &Queue) {
+    pub(crate) async fn signal(&self, queue: &Queue) {
         let mut guard = self.wait_queue.lock().await;
         let map: &mut MessageWaitQueueMap = guard.deref_mut();
         match map.get_mut(&queue.name.to_string()) {
@@ -121,7 +121,7 @@ impl MessageWaitQueue {
     }
 }
 
-pub static MESSAGE_WAIT_QUEUE: Lazy<MessageWaitQueue> = Lazy::new(|| MessageWaitQueue::new());
+pub(crate) static MESSAGE_WAIT_QUEUE: Lazy<MessageWaitQueue> = Lazy::new(|| MessageWaitQueue::new());
 
 #[cfg(test)]
 pub(crate) mod test {
