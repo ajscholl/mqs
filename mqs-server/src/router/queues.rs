@@ -1,10 +1,11 @@
 use async_trait::async_trait;
 use hyper::{Body, Request, Response};
 use mqs_common::router::Handler;
+use std::convert::TryInto;
 
 use crate::{
     models::queue::QueueRepository,
-    routes::queues::{delete_queue, describe_queue, list_queues, new_queue, update_queue, QueuesRange},
+    routes::queues::{delete_queue, describe_queue, list_queues, new_queue, update_queue},
 };
 
 pub struct DescribeQueueHandler {
@@ -86,7 +87,6 @@ impl<R: QueueRepository, S: Send> Handler<(R, S)> for ListQueuesHandler {
         R: 'async_trait,
         S: 'async_trait,
     {
-        let range = QueuesRange::from_hyper(req);
-        list_queues(repo, range).into_response()
+        list_queues(repo, (&req).try_into()).into_response()
     }
 }

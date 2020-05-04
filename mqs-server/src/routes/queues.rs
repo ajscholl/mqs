@@ -1,7 +1,7 @@
 use diesel::QueryResult;
-use hyper::Body;
+use hyper::{Body, Request};
 use mqs_common::{status::Status, QueueConfig, QueuesResponse};
-use std::collections::HashMap;
+use std::convert::TryFrom;
 
 use crate::{
     models::queue::{QueueInput, QueueRepository},
@@ -99,28 +99,20 @@ pub(crate) struct QueuesRange {
     limit:  Option<i64>,
 }
 
-impl QueuesRange {
-    pub(crate) fn from_hyper(req: hyper::Request<Body>) -> Result<QueuesRange, String> {
-        let query = req.uri().query().unwrap_or("");
-        let mut query_params = HashMap::new();
-        for param in query.split("&").into_iter() {
-            if param.is_empty() {
-                continue;
-            }
+impl TryFrom<&Request<Body>> for QueuesRange {
+    type Error = String;
 
-            // TODO: add proper query param parsing and url param decoding
-            let mut i = param.splitn(2, "=").into_iter();
-            let name = i.next().unwrap_or("");
-            let value = i.next().unwrap_or("");
-            debug_assert!(i.next().is_none());
-            query_params.insert(name, value);
+    fn try_from(req: &Request<Body>) -> Result<Self, Self::Error> {
+        let query = req.uri().query().unwrap_or("");
+        let mut offset = Ok(None);
+        let mut limit = Ok(None);
+        for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
+            if key.as_ref() == "offset" {
+                offset = value.parse().map_or_else(|e| Err(e), |v| Ok(Some(v)));
+            } else if key.as_ref() == "limit" {
+                limit = value.parse().map_or_else(|e| Err(e), |v| Ok(Some(v)));
+            }
         }
-        let offset = query_params
-            .get("offset")
-            .map_or_else(|| Ok(None), |s| s.parse().map_or_else(|e| Err(e), |v| Ok(Some(v))));
-        let limit = query_params
-            .get("limit")
-            .map_or_else(|| Ok(None), |s| s.parse().map_or_else(|e| Err(e), |v| Ok(Some(v))));
 
         match (offset, limit) {
             (Err(err), _) => Err(format!("invalid value for number field offset: {}", err)),
