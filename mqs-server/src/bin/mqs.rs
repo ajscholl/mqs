@@ -1,4 +1,5 @@
 #![warn(
+    missing_docs,
     rust_2018_idioms,
     future_incompatible,
     missing_copy_implementations,
@@ -8,6 +9,9 @@
     unused_qualifications,
     variant_size_differences
 )]
+#![cfg_attr(test, deny(warnings))]
+
+//! MQS server binary.
 
 #[macro_use]
 extern crate log;
@@ -36,19 +40,13 @@ use std::{
 use tokio::{runtime::Builder, time::delay_for};
 
 use mqs_common::{
-    logger::{
-        configure_logger,
-        json::Logger,
-        trace_id::{create_trace_id, with_trace_id},
-        NewJsonLogger,
-    },
+    logger::{configure_logger, create_trace_id, json::Logger, with_trace_id, NewJsonLogger},
     router::{handle, Router},
 };
 use mqs_server::{
-    connection::{init_pool, DbConn, Pool},
-    models::PgRepository,
-    router::make_router,
-    routes::messages::Source,
+    connection::{init_pool_maybe, Pool, Source},
+    make_router,
+    PgRepository,
 };
 
 struct HandlerService {
@@ -70,7 +68,7 @@ impl RepoSource {
 impl Source<PgRepository> for RepoSource {
     fn get(&self) -> Option<PgRepository> {
         let conn = self.pool.try_get()?;
-        Some(PgRepository::new(DbConn(conn)))
+        Some(PgRepository::new(conn))
     }
 }
 
@@ -84,7 +82,7 @@ impl HandlerService {
     }
 
     async fn handle(&self, req: Request<Body>) -> Result<Response<Body>, Infallible> {
-        let conn = self.pool.get().map_or_else(|_| None, |conn| Some(DbConn(conn)));
+        let conn = self.pool.get().map_or_else(|_| None, |conn| Some(conn));
         let repo = match conn {
             None => None,
             Some(conn) => Some(PgRepository::new(conn)),
@@ -126,7 +124,7 @@ fn main() {
     static LOGGER: Lazy<Logger<Stdout>, NewJsonLogger> = Lazy::new(NewJsonLogger::new(Level::Info));
     configure_logger(LOGGER.deref());
 
-    let (pool, pool_size) = init_pool();
+    let (pool, pool_size) = init_pool_maybe().expect("Failed to initialize database pool");
     let mut rt = Builder::new()
         .enable_all()
         .threaded_scheduler()

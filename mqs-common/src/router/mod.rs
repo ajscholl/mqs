@@ -22,10 +22,15 @@ pub trait Handler<A>: Sync + Send {
         A: 'async_trait;
 }
 
+/// A wildcard router accepts a single arbitrary string and returns a new router to continue
+/// parsing the rest of the URL.
 pub trait WildcardRouter<A>: Sync + Send {
+    /// Accept a single segment like "foo" in "/some/path/to/foo/and/some/more" if the `WildcardRouter`
+    /// was reachable via the "/some/path/to" path.
     fn with_segment(&self, segment: &str) -> Router<A>;
 }
 
+/// A router can map a URL path to a handler.
 pub struct Router<A> {
     handler:         HashMap<Method, Arc<dyn Handler<A>>>,
     wildcard_router: Option<Arc<dyn WildcardRouter<A>>>,
@@ -33,6 +38,9 @@ pub struct Router<A> {
 }
 
 impl<A> Router<A> {
+    /// Route a single request with the given method and segments of the URL. The segments are
+    /// expected to be the path of the URL split by the '/' characters.
+    /// If no route can be found, `None` is returned.
     pub fn route<'a, I: Iterator<Item = &'a str>>(
         &self,
         method: &Method,
@@ -57,6 +65,7 @@ impl<A> Router<A> {
         }
     }
 
+    /// Create a new empty router. The router does not route any requests initially.
     pub fn new() -> Self {
         Router {
             handler:         HashMap::new(),
@@ -65,10 +74,14 @@ impl<A> Router<A> {
         }
     }
 
+    /// Create a new router with a single handler registered on the root path for the given method.
     pub fn new_simple<H: 'static + Handler<A>>(method: Method, handler: H) -> Self {
         Self::new().with_handler(method, handler)
     }
 
+    /// Create a new router from the current router which routes a request to the root with the given
+    /// method to the given handler. Panics the router already has a handler for the root and the
+    /// given method.
     pub fn with_handler<H: 'static + Handler<A>>(mut self, method: Method, handler: H) -> Self {
         if let Some(_existing) = self.handler.insert(method, Arc::new(handler)) {
             panic!("Can not set handler - already set!");
@@ -76,6 +89,8 @@ impl<A> Router<A> {
         self
     }
 
+    /// Create a new router from the current router with the next segment handled by the given wildcard
+    /// router. Panics if the router already has a wildcard router set.
     pub fn with_wildcard<R: 'static + WildcardRouter<A>>(mut self, handler: R) -> Self {
         if self.wildcard_router.is_some() {
             panic!("Can not set wildcard - already set!");
@@ -84,6 +99,8 @@ impl<A> Router<A> {
         self
     }
 
+    /// Create a new router from the current router with a new route handled by the given router.
+    /// Panics if the router already has a router set for that route.
     pub fn with_route(mut self, route: &'static str, router: Router<A>) -> Self {
         if let Some(_existing) = self.sub_router.insert(route, router) {
             panic!("Overwrote existing route {}", route);
@@ -91,6 +108,8 @@ impl<A> Router<A> {
         self
     }
 
+    /// Create a new router from the current router handling a request to the given route (a single
+    /// segment) with the given method handled by the given handler.
     pub fn with_route_simple<H: 'static + Handler<A>>(self, route: &'static str, method: Method, handler: H) -> Self {
         self.with_route(route, Self::new_simple(method, handler))
     }

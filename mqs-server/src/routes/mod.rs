@@ -3,7 +3,7 @@ use hyper::{
     Body,
     HeaderMap,
 };
-use mqs_common::{multipart, status::Status, TRACE_ID_HEADER};
+use mqs_common::{multipart, Status, TRACE_ID_HEADER};
 use serde::Serialize;
 
 use crate::models::message::Message;

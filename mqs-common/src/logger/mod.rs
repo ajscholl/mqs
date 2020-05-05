@@ -7,15 +7,23 @@ use std::{
     io::{stdout, Stdout, Write},
 };
 
+/// A logger implementation which writes each log messages as a json encoded object.
 pub mod json;
-pub mod trace_id;
+mod trace_id;
 
+pub use trace_id::*;
+
+/// A function which creates a new json logger. It will look up the 'LOG_LEVEL' environment variable
+/// and use that (if it is set to any of 'trace', 'debug', 'info', 'warn', or 'error') as the log
+/// level. Otherwise it will fall back to the default log level specified in `new`.
 #[derive(Clone, Copy)]
 pub struct NewJsonLogger {
     default_log_level: Level,
 }
 
 impl NewJsonLogger {
+    /// Create a factory function for a json logger. The function will use the given
+    /// log level as default if no other level is specified in the environment.
     pub const fn new(default_log_level: Level) -> Self {
         NewJsonLogger { default_log_level }
     }
@@ -54,6 +62,8 @@ impl<Args> FnMut<Args> for NewJsonLogger {
     }
 }
 
+/// Set the given json logger as the current logger and set the log level to the level specified
+/// by the json logger.
 pub fn configure_logger<W: Write + Send>(logger: &'static Logger<W>) {
     log::set_logger(logger)
         .map(|()| log::set_max_level(logger.level().to_level_filter()))

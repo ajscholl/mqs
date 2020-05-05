@@ -7,7 +7,7 @@ use hyper::{
 };
 use std::convert::Infallible;
 
-use crate::{read_body, router::Router, status::Status};
+use crate::{read_body, router::Router, Status};
 
 /// Handle a single request using the given router.
 ///

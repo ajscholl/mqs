@@ -6,16 +6,19 @@ use r2d2::{
     Error,
     HandleError,
     HandleEvent,
+    PooledConnection,
 };
 use r2d2_diesel::ConnectionManager;
 use serde::export::fmt::Display;
-use std::{env, ops::Deref, time::Duration};
+use std::{env, time::Duration};
 
+/// Type alias for our database connection pool type.
 pub type Pool = r2d2::Pool<ConnectionManager<PgConnection>>;
 
-pub struct DbConn(pub r2d2::PooledConnection<ConnectionManager<PgConnection>>);
+/// Type alias for our database connection type.
+pub type DBConn = PooledConnection<ConnectionManager<PgConnection>>;
 
-pub fn init_pool_builder() -> Result<(Builder<ConnectionManager<PgConnection>>, u16), Error> {
+fn init_pool_builder() -> (Builder<ConnectionManager<PgConnection>>, u16) {
     let (min_size, max_size) = pool_size();
     let pool_builder = Pool::builder()
         .min_idle(Some(min_size as u32))
@@ -24,19 +27,17 @@ pub fn init_pool_builder() -> Result<(Builder<ConnectionManager<PgConnection>>, 
         .event_handler(Box::new(ConnectionHandler::new()))
         .error_handler(Box::new(ConnectionHandler::new()));
 
-    Ok((pool_builder, max_size))
+    (pool_builder, max_size)
 }
 
+/// Create a new database pool and connect the minimum required amount of connections.
+/// If
 pub fn init_pool_maybe() -> Result<(Pool, u16), Error> {
     let manager = ConnectionManager::<PgConnection>::new(database_url());
-    let (pool_builder, max_size) = init_pool_builder()?;
+    let (pool_builder, max_size) = init_pool_builder();
     let pool = pool_builder.build(manager)?;
 
     Ok((pool, max_size))
-}
-
-pub fn init_pool() -> (Pool, u16) {
-    init_pool_maybe().expect("Failed to initialize database pool")
 }
 
 fn database_url() -> String {
@@ -50,14 +51,6 @@ fn pool_size() -> (u16, u16) {
     let min_size = min_size.parse::<u16>().expect("MIN_POOL_SIZE must be an integer");
 
     (min_size, max_size)
-}
-
-impl Deref for DbConn {
-    type Target = PgConnection;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
 }
 
 #[derive(Debug)]
@@ -100,6 +93,32 @@ impl<E: Display> HandleError<E> for ConnectionHandler {
     }
 }
 
+/// A `Source` can be used to get (potentially) scarce resources like database connections.
+///
+/// ```
+/// use mqs_server::connection::Source;
+///
+/// #[derive(Debug, PartialEq)]
+/// struct DbConn {}
+///
+/// struct ConnSource {}
+///
+/// impl Source<DbConn> for ConnSource {
+///     fn get(&self) -> Option<DbConn> {
+///         Some(DbConn {})
+///     }
+/// }
+///
+/// fn main() {
+///     let src = ConnSource {};
+///     assert_eq!(src.get(), Some(DbConn {}));
+/// }
+/// ```
+pub trait Source<R>: Send {
+    /// Get a resource from a `Source`.
+    fn get(&self) -> Option<R>;
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -116,7 +135,7 @@ mod test {
         assert_eq!((50, 50), pool_size());
         env::set_var("MIN_POOL_SIZE", "20");
         assert_eq!((20, 50), pool_size());
-        let (_builder, max_size) = init_pool_builder().unwrap();
+        let (_builder, max_size) = init_pool_builder();
         assert_eq!(max_size, 50);
     }
 }

@@ -54,10 +54,10 @@ use hyper::{
 use mqs_common::{
     multipart,
     read_body,
-    status::Status::ServiceUnavailable,
     QueueConfig,
     QueueDescriptionOutput,
     QueuesResponse,
+    Status::ServiceUnavailable,
     DEFAULT_CONTENT_TYPE,
     TRACE_ID_HEADER,
 };

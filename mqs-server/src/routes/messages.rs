@@ -2,10 +2,11 @@ use hyper::{
     header::{HeaderValue, CONTENT_ENCODING, CONTENT_TYPE},
     HeaderMap,
 };
-use mqs_common::{get_header, multipart, status::Status, DEFAULT_CONTENT_TYPE, TRACE_ID_HEADER};
+use mqs_common::{get_header, multipart, Status, DEFAULT_CONTENT_TYPE, TRACE_ID_HEADER};
 use uuid::Uuid;
 
 use crate::{
+    connection::Source,
     models::{
         message::{MessageInput, MessageRepository},
         queue::QueueRepository,
@@ -88,10 +89,6 @@ pub(crate) async fn publish_messages<R: QueueRepository + MessageRepository>(
 pub(crate) struct MessageCount(pub(crate) i64);
 #[derive(Clone, Copy)]
 pub(crate) struct MaxWaitTime(pub(crate) u64);
-
-pub trait Source<R>: Send {
-    fn get(&self) -> Option<R>;
-}
 
 pub(crate) async fn receive_messages<R: QueueRepository + MessageRepository, S: Source<R>>(
     repo: R,

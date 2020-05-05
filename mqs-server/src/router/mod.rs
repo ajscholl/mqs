@@ -2,13 +2,13 @@ use hyper::Method;
 use mqs_common::router::{Router, WildcardRouter};
 
 use crate::{
+    connection::Source,
     models::{health::HealthCheckRepository, message::MessageRepository, queue::QueueRepository},
     router::{
         health::HealthHandler,
         messages::{DeleteMessageHandler, PublishMessagesHandler, ReceiveMessagesHandler},
         queues::{CreateQueueHandler, DeleteQueueHandler, DescribeQueueHandler, ListQueuesHandler, UpdateQueueHandler},
     },
-    routes::messages::Source,
 };
 
 mod health;
@@ -52,6 +52,7 @@ impl<R: QueueRepository + MessageRepository, S: Source<R>> WildcardRouter<(R, S)
     }
 }
 
+/// Create a new instance of the router.
 pub fn make_router<R: QueueRepository + MessageRepository + HealthCheckRepository, S: Source<R>>() -> Router<(R, S)> {
     Router::new()
         .with_route_simple("health", Method::GET, HealthHandler)
@@ -72,8 +73,8 @@ mod test {
     use hyper::{header::HeaderName, Body, Request, Response, StatusCode};
     use mqs_common::{
         router::Handler,
-        status::Status,
         test::{make_runtime, read_body},
+        Status,
     };
     use std::sync::{Arc, Mutex};
 

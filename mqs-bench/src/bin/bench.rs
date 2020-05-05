@@ -1,4 +1,5 @@
 #![warn(
+    missing_docs,
     rust_2018_idioms,
     future_incompatible,
     missing_copy_implementations,
@@ -8,6 +9,10 @@
     unused_qualifications,
     variant_size_differences
 )]
+#![cfg_attr(test, deny(warnings))]
+
+//! Benchmark application which creates a lot of messages and consumes them again against a MQS server.
+//! Used in CI tests.
 
 use chrono::Utc;
 use std::{

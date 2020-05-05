@@ -1,15 +1,18 @@
-use crate::connection::DbConn;
+use crate::connection::DBConn;
 
 pub mod health;
 pub mod message;
 pub mod queue;
 
+/// A `PgRepository` implements the different repository traits to provide a database access layer
+/// for the different request handlers.
 pub struct PgRepository {
-    conn: DbConn,
+    conn: DBConn,
 }
 
 impl PgRepository {
-    pub fn new(conn: DbConn) -> Self {
+    /// Create a new repository with the given database connection.
+    pub fn new(conn: DBConn) -> Self {
         PgRepository { conn }
     }
 }
@@ -17,12 +20,12 @@ impl PgRepository {
 #[cfg(test)]
 pub(crate) mod test {
     use crate::{
+        connection::Source,
         models::{
             health::HealthCheckRepository,
             message::{add_pg_interval, Message, MessageInput, MessageRepository},
             queue::{pg_interval, Queue, QueueDescription, QueueInput, QueueRepository, QueueSource},
         },
-        routes::messages::Source,
     };
     use chrono::Utc;
     use diesel::QueryResult;

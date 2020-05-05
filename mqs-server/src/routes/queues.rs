@@ -1,6 +1,6 @@
 use diesel::QueryResult;
 use hyper::{Body, Request};
-use mqs_common::{status::Status, QueueConfig, QueuesResponse};
+use mqs_common::{QueueConfig, QueuesResponse, Status};
 use std::convert::TryFrom;
 
 use crate::{

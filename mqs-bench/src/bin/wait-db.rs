@@ -1,4 +1,5 @@
 #![warn(
+    missing_docs,
     rust_2018_idioms,
     future_incompatible,
     missing_copy_implementations,
@@ -8,6 +9,9 @@
     unused_qualifications,
     variant_size_differences
 )]
+#![cfg_attr(test, deny(warnings))]
+
+//! Tool to wait until a connection to the database can be established. Used in CI tests.
 
 #[macro_use]
 extern crate log;

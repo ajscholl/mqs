@@ -1,5 +1,6 @@
 #![feature(unboxed_closures, fn_traits, in_band_lifetimes)]
 #![warn(
+    missing_docs,
     rust_2018_idioms,
     future_incompatible,
     missing_copy_implementations,
@@ -28,10 +29,15 @@ use hyper::{
 };
 use uuid::Uuid;
 
+/// Logging utils for mqs applications.
 pub mod logger;
+/// Encoding and decoding of multipart/mixed messages.
 pub mod multipart;
+/// Request routing and handling.
 pub mod router;
-pub mod status;
+mod status;
+
+pub use status::*;
 
 /// Content type used if the client does not specify one.
 pub const DEFAULT_CONTENT_TYPE: &'static str = "application/octet-stream";

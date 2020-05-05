@@ -6,7 +6,7 @@ use std::{
     sync::Mutex,
 };
 
-use crate::logger::trace_id::get_trace_id;
+use crate::logger::get_trace_id;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 struct LogMessage<'a> {
@@ -37,12 +37,25 @@ impl<'a> LogMessage<'a> {
     }
 }
 
+/// A json logger which writes each log message as json encoded object on a new line.
 pub struct Logger<W: Write> {
     level:  Level,
     writer: Mutex<Cell<BufWriter<W>>>,
 }
 
 impl<W: Write> Logger<W> {
+    /// Create a new json logger with the given level and writer.
+    ///
+    /// ```
+    /// use log::Level;
+    /// use mqs_common::logger::json::Logger;
+    /// use std::io::stdout;
+    ///
+    /// fn main() {
+    ///     let logger = Logger::new(Level::Info, stdout());
+    ///     assert_eq!(logger.level(), Level::Info);
+    /// }
+    /// ```
     pub fn new(level: Level, writer: W) -> Self {
         Logger {
             level,
@@ -50,10 +63,38 @@ impl<W: Write> Logger<W> {
         }
     }
 
+    /// Get the current level of the logger. This is not the level configured by the logging library,
+    /// but an additional filter for messages which are reaching this logger!
+    ///
+    /// ```
+    /// use log::Level;
+    /// use mqs_common::logger::json::Logger;
+    /// use std::io::stdout;
+    ///
+    /// fn main() {
+    ///     let logger = Logger::new(Level::Info, stdout());
+    ///     assert_eq!(logger.level(), Level::Info);
+    /// }
+    /// ```
     pub fn level(&self) -> Level {
         self.level
     }
 
+    /// Change the current level of this logger. This is not the level configured by the logging library,
+    /// but an additional filter for messages which are reaching this logger!
+    ///
+    /// ```
+    /// use log::Level;
+    /// use mqs_common::logger::json::Logger;
+    /// use std::io::stdout;
+    ///
+    /// fn main() {
+    ///     let mut logger = Logger::new(Level::Info, stdout());
+    ///     assert_eq!(logger.level(), Level::Info);
+    ///     logger.set_level(Level::Warn);
+    ///     assert_eq!(logger.level(), Level::Warn);
+    /// }
+    /// ```
     pub fn set_level(&mut self, level: Level) {
         self.level = level;
     }
