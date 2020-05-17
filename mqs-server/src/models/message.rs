@@ -52,10 +52,10 @@ pub struct Message {
     pub trace_id:         Option<Uuid>,
 }
 
-pub(crate) fn add_pg_interval(time: &DateTime<Utc>, offset: &PgInterval) -> DateTime<Utc> {
+pub fn add_pg_interval(time: &DateTime<Utc>, offset: &PgInterval) -> DateTime<Utc> {
     let us = Duration::microseconds(offset.microseconds);
-    let d = Duration::days(offset.days as i64);
-    let m = Duration::days(offset.months as i64 * 30);
+    let d = Duration::days(i64::from(offset.days));
+    let m = Duration::days(i64::from(offset.months) * 30);
     time.add(us + d + m)
 }
 
@@ -177,8 +177,8 @@ struct MessageIdsForFetch<'a> {
 }
 
 impl<'a> MessageIdsForFetch<'a> {
-    fn new(queue_name: &'a str, visible_since: NaiveDateTime, count: i64) -> MessageIdsForFetch<'a> {
-        MessageIdsForFetch {
+    const fn new(queue_name: &'a str, visible_since: NaiveDateTime, count: i64) -> Self {
+        Self {
             queue_name,
             visible_since,
             count,
@@ -229,8 +229,8 @@ where
 }
 
 impl<F, V> In<F, V> {
-    fn new(field: F, values: V) -> In<F, V> {
-        In { field, values }
+    const fn new(field: F, values: V) -> Self {
+        Self { field, values }
     }
 }
 

@@ -5,7 +5,6 @@ use hyper::{
     Request,
     Response,
 };
-use std::convert::Infallible;
 
 use crate::{read_body, router::Router, Status};
 
@@ -39,13 +38,11 @@ use crate::{read_body, router::Router, Status};
 ///
 /// make_runtime().block_on(async {
 ///     let router = Router::new_simple(Method::GET, ExampleHandler {});
-///     let mut response = handle(None, IntSource { int: 5 }, &router, 100, Request::new(Body::default()))
-///         .await
-///         .unwrap();
+///     let mut response = handle(None, IntSource { int: 5 }, &router, 100, Request::new(Body::default())).await;
 ///     assert_eq!(response.status(), 503);
 ///     assert_eq!(
 ///         read_body(response.body_mut(), None).await.unwrap().unwrap(),
-///         "{\"error\":\"Service unavailable, try again later\"}".as_bytes()
+///         b"{\"error\":\"Service unavailable, try again later\"}".as_ref()
 ///     );
 ///     let mut response = handle(
 ///         Some(42),
@@ -54,19 +51,18 @@ use crate::{read_body, router::Router, Status};
 ///         100,
 ///         Request::new(Body::default()),
 ///     )
-///     .await
-///     .unwrap();
+///     .await;
 ///     assert_eq!(response.status(), 200);
 ///     assert_eq!(read_body(response.body_mut(), None).await.unwrap().unwrap(), b"42 -> 5");
 /// });
 /// ```
-pub async fn handle<T, S>(
+pub async fn handle<T: Send, S: Send>(
     conn: Option<T>,
     source: S,
     router: &Router<(T, S)>,
     max_message_size: usize,
     mut req: Request<Body>,
-) -> Result<Response<Body>, Infallible> {
+) -> Response<Body> {
     let version = req.version();
     let mut response = if let Some(conn) = conn {
         let segments = req.uri().path().split('/');
@@ -135,7 +131,7 @@ pub async fn handle<T, S>(
             .headers_mut()
             .insert(CONNECTION, HeaderValue::from_static("keep-alive"));
     }
-    Ok(response)
+    response
 }
 
 #[cfg(test)]
@@ -170,26 +166,20 @@ mod test {
     fn test_handler() {
         make_runtime().block_on(async {
             let router = Router::new_simple(Method::GET, EchoHandler {});
-            let mut response = handle(None, (), &router, 100, Request::new(Body::default()))
-                .await
-                .unwrap();
+            let mut response = handle(None, (), &router, 100, Request::new(Body::default())).await;
             assert_eq!(response.status(), 503);
             assert_eq!(
                 read_body(response.body_mut(), None).await.unwrap().unwrap(),
-                "{\"error\":\"Service unavailable, try again later\"}".as_bytes()
+                b"{\"error\":\"Service unavailable, try again later\"}".as_ref()
             );
-            let mut response = handle(Some(42), (), &router, 100, Request::new(Body::default()))
-                .await
-                .unwrap();
+            let mut response = handle(Some(42), (), &router, 100, Request::new(Body::default())).await;
             assert_eq!(response.status(), 200);
             assert_eq!(read_body(response.body_mut(), None).await.unwrap().unwrap(), b"42 -> ");
-            let mut response = handle(Some(42), (), &router, 3, Request::new(Body::from("hello".to_string())))
-                .await
-                .unwrap();
+            let mut response = handle(Some(42), (), &router, 3, Request::new(Body::from("hello".to_string()))).await;
             assert_eq!(response.status(), 413);
             assert_eq!(
                 read_body(response.body_mut(), None).await.unwrap().unwrap(),
-                "{\"error\":\"Payload too large\"}".as_bytes()
+                b"{\"error\":\"Payload too large\"}".as_ref()
             );
             let mut response = handle(
                 Some(42),
@@ -198,12 +188,11 @@ mod test {
                 3,
                 Request::new(Body::from("hello".to_string())),
             )
-            .await
-            .unwrap();
+            .await;
             assert_eq!(response.status(), 404);
             assert_eq!(
                 read_body(response.body_mut(), None).await.unwrap().unwrap(),
-                "{\"error\":\"No handler found for request\"}".as_bytes()
+                b"{\"error\":\"No handler found for request\"}".as_ref()
             );
         });
     }

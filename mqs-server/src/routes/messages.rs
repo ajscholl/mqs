@@ -2,7 +2,7 @@ use hyper::{
     header::{HeaderValue, CONTENT_ENCODING, CONTENT_TYPE},
     HeaderMap,
 };
-use mqs_common::{get_header, multipart, Status, DEFAULT_CONTENT_TYPE, TRACE_ID_HEADER};
+use mqs_common::{get_header, multipart, Status, TraceIdHeader, DEFAULT_CONTENT_TYPE};
 use uuid::Uuid;
 
 use crate::{
@@ -21,7 +21,7 @@ fn boundary_from_headers(headers: &HeaderMap<HeaderValue>) -> Option<String> {
     multipart::is_multipart(content_type)
 }
 
-pub(crate) async fn publish_messages<R: QueueRepository + MessageRepository>(
+pub async fn publish<R: QueueRepository + MessageRepository>(
     repo: R,
     queue_name: &str,
     message_content: &[u8],
@@ -39,7 +39,7 @@ pub(crate) async fn publish_messages<R: QueueRepository + MessageRepository>(
         },
         Ok(messages) => messages,
     };
-    let queue = match repo.find_by_name_cached(&queue_name) {
+    let queue = match repo.find_by_name_cached(queue_name) {
         Err(err) => {
             error!("Failed to find queue {} for new message: {}", &queue_name, err);
             return MqsResponse::status(Status::InternalServerError);
@@ -61,7 +61,7 @@ pub(crate) async fn publish_messages<R: QueueRepository + MessageRepository>(
                 .get(CONTENT_TYPE)
                 .map_or_else(|| DEFAULT_CONTENT_TYPE, |v| v.to_str().unwrap_or(DEFAULT_CONTENT_TYPE)),
             content_encoding: get_header(&message_headers, CONTENT_ENCODING),
-            trace_id:         TRACE_ID_HEADER.get(&message_headers),
+            trace_id:         TraceIdHeader::get(&message_headers),
         }) {
             Err(err) => {
                 error!("Failed to insert new message into queue {}: {}", &queue_name, err);
@@ -86,11 +86,11 @@ pub(crate) async fn publish_messages<R: QueueRepository + MessageRepository>(
 }
 
 #[derive(Clone, Copy)]
-pub(crate) struct MessageCount(pub(crate) i64);
+pub struct MessageCount(pub i64);
 #[derive(Clone, Copy)]
-pub(crate) struct MaxWaitTime(pub(crate) u64);
+pub struct MaxWaitTime(pub u64);
 
-pub(crate) async fn receive_messages<R: QueueRepository + MessageRepository, S: Source<R>>(
+pub async fn receive<R: QueueRepository + MessageRepository, S: Source<R>>(
     repo: R,
     repo_source: S,
     queue_name: &str,
@@ -154,7 +154,7 @@ pub(crate) async fn receive_messages<R: QueueRepository + MessageRepository, S: 
     }
 }
 
-pub(crate) fn delete_message<R: MessageRepository>(repo: R, message_id: &str) -> MqsResponse {
+pub fn delete<R: MessageRepository>(repo: &R, message_id: &str) -> MqsResponse {
     match Uuid::parse_str(message_id) {
         Err(_) => MqsResponse::error_static("Message ID needs to be a UUID"),
         Ok(id) => {

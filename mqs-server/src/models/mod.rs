@@ -13,7 +13,7 @@ pub struct PgRepository {
 impl PgRepository {
     /// Create a new repository with the given database connection.
     pub fn new(conn: DBConn) -> Self {
-        PgRepository { conn }
+        Self { conn }
     }
 }
 

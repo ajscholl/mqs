@@ -7,6 +7,7 @@ use diesel::{
 };
 use mqs_common::{QueueConfig, QueueConfigOutput, QueueRedrivePolicy};
 use std::{
+    convert::TryFrom,
     ops::Deref,
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -97,11 +98,11 @@ impl Queue {
     }
 }
 
-fn pg_interval_seconds(interval: &PgInterval) -> i64 {
-    interval.microseconds / 1000000 + interval.days as i64 * (24 * 3600) + interval.months as i64 * (30 * 24 * 3600)
+const fn pg_interval_seconds(interval: &PgInterval) -> i64 {
+    interval.microseconds / 1_000_000 + interval.days as i64 * (24 * 3600) + interval.months as i64 * (30 * 24 * 3600)
 }
 
-pub(crate) fn pg_interval(mut seconds: i64) -> PgInterval {
+pub fn pg_interval(mut seconds: i64) -> PgInterval {
     if seconds < 0 {
         let int = pg_interval(-seconds);
 
@@ -119,8 +120,8 @@ pub(crate) fn pg_interval(mut seconds: i64) -> PgInterval {
 
     PgInterval {
         microseconds: seconds * 1_000_000,
-        days:         days as i32,
-        months:       months as i32,
+        days:         i32::try_from(days).unwrap_or_else(|_| i32::max_value()),
+        months:       i32::try_from(months).unwrap_or_else(|_| i32::max_value()),
     }
 }
 

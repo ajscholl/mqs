@@ -4,12 +4,12 @@ use mqs_common::{QueueConfig, QueuesResponse, Status};
 use std::convert::TryFrom;
 
 use crate::{
-    models::queue::{QueueInput, QueueRepository},
+    models::queue::{Queue, QueueInput, QueueRepository},
     routes::MqsResponse,
 };
 
-pub(crate) fn new_queue<R: QueueRepository>(
-    repo: R,
+pub fn new<R: QueueRepository>(
+    repo: &R,
     queue_name: &str,
     params: Result<QueueConfig, serde_json::Error>,
 ) -> MqsResponse {
@@ -17,7 +17,7 @@ pub(crate) fn new_queue<R: QueueRepository>(
         Err(err) => {
             let err_message = format!("{:?}", err);
             error!("Failed to parse queue params: {}", &err_message);
-            MqsResponse::error_owned(err_message)
+            MqsResponse::error_owned(&err_message)
         },
         Ok(config) => {
             info!("Creating new queue {}", queue_name);
@@ -41,8 +41,8 @@ pub(crate) fn new_queue<R: QueueRepository>(
     }
 }
 
-pub(crate) fn update_queue<R: QueueRepository>(
-    repo: R,
+pub fn update<R: QueueRepository>(
+    repo: &R,
     queue_name: &str,
     params: Result<QueueConfig, serde_json::Error>,
 ) -> MqsResponse {
@@ -50,7 +50,7 @@ pub(crate) fn update_queue<R: QueueRepository>(
         Err(err) => {
             let err_message = format!("{:?}", err);
             error!("Failed to parse queue params: {}", &err_message);
-            MqsResponse::error_owned(err_message)
+            MqsResponse::error_owned(&err_message)
         },
         Ok(config) => {
             info!("Updating queue {}", queue_name);
@@ -74,7 +74,7 @@ pub(crate) fn update_queue<R: QueueRepository>(
     }
 }
 
-pub(crate) fn delete_queue<R: QueueRepository>(repo: R, queue_name: &str) -> MqsResponse {
+pub fn delete<R: QueueRepository>(repo: &R, queue_name: &str) -> MqsResponse {
     info!("Deleting queue {}", queue_name);
     let deleted = repo.delete_queue_by_name(queue_name);
     match deleted {
@@ -94,12 +94,12 @@ pub(crate) fn delete_queue<R: QueueRepository>(repo: R, queue_name: &str) -> Mqs
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct QueuesRange {
+pub struct Range {
     offset: Option<i64>,
     limit:  Option<i64>,
 }
 
-impl TryFrom<&Request<Body>> for QueuesRange {
+impl TryFrom<&Request<Body>> for Range {
     type Error = String;
 
     fn try_from(req: &Request<Body>) -> Result<Self, Self::Error> {
@@ -117,23 +117,23 @@ impl TryFrom<&Request<Body>> for QueuesRange {
         match (offset, limit) {
             (Err(err), _) => Err(format!("invalid value for number field offset: {}", err)),
             (_, Err(err)) => Err(format!("invalid value for number field limit: {}", err)),
-            (Ok(offset), Ok(limit)) => Ok(QueuesRange { offset, limit }),
+            (Ok(offset), Ok(limit)) => Ok(Self { offset, limit }),
         }
     }
 }
 
-fn list_queues_and_count<R: QueueRepository>(repo: R, range: &QueuesRange) -> QueryResult<QueuesResponse> {
+fn list_queues_and_count<R: QueueRepository>(repo: &R, range: &Range) -> QueryResult<QueuesResponse> {
     let queues = repo.list_queues(range.offset, range.limit)?;
     let total = repo.count_queues()?;
     Ok(QueuesResponse {
-        queues: queues.into_iter().map(|queue| queue.into_config_output()).collect(),
+        queues: queues.into_iter().map(Queue::into_config_output).collect(),
         total,
     })
 }
 
-pub(crate) fn list_queues<R: QueueRepository>(repo: R, range: Result<QueuesRange, String>) -> MqsResponse {
+pub fn list<R: QueueRepository>(repo: &R, range: Result<Range, String>) -> MqsResponse {
     match range {
-        Err(err) => MqsResponse::error_owned(err),
+        Err(err) => MqsResponse::error_owned(&err),
         Ok(range) => match list_queues_and_count(repo, &range) {
             Ok(response) => MqsResponse::json(&response),
             Err(err) => {
@@ -148,7 +148,7 @@ pub(crate) fn list_queues<R: QueueRepository>(repo: R, range: Result<QueuesRange
     }
 }
 
-pub(crate) fn describe_queue<R: QueueRepository>(repo: R, queue_name: &str) -> MqsResponse {
+pub fn describe<R: QueueRepository>(repo: &R, queue_name: &str) -> MqsResponse {
     match repo.describe_queue(queue_name) {
         Err(err) => {
             error!("Failed to describe queue {}: {}", queue_name, err);

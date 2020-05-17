@@ -41,8 +41,6 @@ pub use status::*;
 
 /// Content type used if the client does not specify one.
 pub const DEFAULT_CONTENT_TYPE: &str = "application/octet-stream";
-/// Header containing the trace id.
-pub const TRACE_ID_HEADER: TraceIdHeader = TraceIdHeader {};
 
 /// Header containing the trace id.
 #[derive(Clone, Copy)]
@@ -53,44 +51,47 @@ impl TraceIdHeader {
     ///
     /// ```
     /// use hyper::header::HeaderName;
-    /// use mqs_common::TRACE_ID_HEADER;
+    /// use mqs_common::TraceIdHeader;
     ///
-    /// assert_eq!(HeaderName::from_static("x-trace-id"), TRACE_ID_HEADER.name());
+    /// assert_eq!(HeaderName::from_static("x-trace-id"), TraceIdHeader::name());
     /// ```
-    pub fn name(&self) -> HeaderName {
+    #[must_use]
+    pub fn name() -> HeaderName {
         HeaderName::from_static("x-trace-id")
     }
 
     /// Get a string representation of the header containing the trace id.
     ///
     /// ```
-    /// use mqs_common::TRACE_ID_HEADER;
+    /// use mqs_common::TraceIdHeader;
     ///
-    /// assert_eq!("X-TRACE-ID", &TRACE_ID_HEADER.upper());
+    /// assert_eq!("X-TRACE-ID", &TraceIdHeader::upper());
     /// ```
-    pub fn upper(&self) -> String {
-        self.name().as_str().to_uppercase()
+    #[must_use]
+    pub fn upper() -> String {
+        Self::name().as_str().to_uppercase()
     }
 
     /// Get the trace id header value.
     ///
     /// ```
     /// use hyper::{header::HeaderValue, HeaderMap};
-    /// use mqs_common::TRACE_ID_HEADER;
+    /// use mqs_common::TraceIdHeader;
     ///
     /// let mut headers = HeaderMap::new();
-    /// assert_eq!(TRACE_ID_HEADER.get(&headers), None);
+    /// assert_eq!(TraceIdHeader::get(&headers), None);
     /// headers.insert(
-    ///     TRACE_ID_HEADER.name(),
+    ///     TraceIdHeader::name(),
     ///     HeaderValue::from_static("2e372a3a-9dff-4c61-8678-753bbdf4295e"),
     /// );
     /// assert_eq!(
-    ///     TRACE_ID_HEADER.get(&headers),
+    ///     TraceIdHeader::get(&headers),
     ///     Some("2e372a3a-9dff-4c61-8678-753bbdf4295e".parse().unwrap())
     /// );
     /// ```
-    pub fn get(&self, headers: &HeaderMap) -> Option<Uuid> {
-        get_header(headers, self.name()).map_or_else(|| None, |s| Uuid::parse_str(s).map_or_else(|_| None, Some))
+    #[must_use]
+    pub fn get(headers: &HeaderMap) -> Option<Uuid> {
+        get_header(headers, Self::name()).map_or_else(|| None, |s| Uuid::parse_str(s).map_or_else(|_| None, Some))
     }
 }
 
@@ -185,6 +186,18 @@ pub struct QueueConfigOutput {
     pub message_deduplication: bool,
 }
 
+// Hack to get clippy to shut up about about possible constant functions for into_description.
+// See: https://github.com/rust-lang/rust-clippy/issues/4979
+impl Drop for QueueConfigOutput {
+    fn drop(&mut self) {}
+}
+
+fn exchange<T>(a: &mut T, mut b: T) -> T {
+    std::mem::swap(a, &mut b);
+
+    b
+}
+
 impl QueueConfigOutput {
     /// Convert a `QueueConfigOutput` into a `QueueDescriptionOutput`. We can't use `From` for this
     /// as we need to provide some additional parameters.
@@ -221,15 +234,16 @@ impl QueueConfigOutput {
     ///     },
     /// });
     /// ```
+    #[must_use]
     pub fn into_description(
-        self,
+        mut self,
         messages: i64,
         visible_messages: i64,
         oldest_message_age: i64,
     ) -> QueueDescriptionOutput {
         QueueDescriptionOutput {
-            name:                  self.name,
-            redrive_policy:        self.redrive_policy,
+            name:                  exchange(&mut self.name, String::new()),
+            redrive_policy:        exchange(&mut self.redrive_policy, None),
             retention_timeout:     self.retention_timeout,
             visibility_timeout:    self.visibility_timeout,
             message_delay:         self.message_delay,
@@ -267,6 +281,10 @@ pub struct QueuesResponse {
 ///     Ok(())
 /// }
 /// ```
+///
+/// # Errors
+///
+/// If reading any chunk returns an error.
 pub async fn read_body(body: &mut Body, max_size: Option<usize>) -> Result<Option<Vec<u8>>, hyper::error::Error> {
     let mut chunks = Vec::new();
     let mut total_length = 0;
@@ -293,9 +311,22 @@ pub async fn read_body(body: &mut Body, max_size: Option<usize>) -> Result<Optio
 
 /// Test utilities for client and server parts as well as some tests for this module.
 pub mod test {
-    use super::*;
+    #[cfg(test)]
+    use http::header::HeaderName;
     use hyper::Body;
+    #[cfg(test)]
+    use hyper::HeaderMap;
     use tokio::runtime::{Builder, Runtime};
+
+    #[cfg(test)]
+    use crate::{
+        get_header,
+        QueueConfigOutput,
+        QueueDescriptionOutput,
+        QueueRedrivePolicy,
+        QueueStatus,
+        TraceIdHeader,
+    };
 
     /// Create a new tokio runtime to use in tests.
     ///
@@ -308,6 +339,7 @@ pub mod test {
     /// });
     /// assert!(done);
     /// ```
+    #[must_use]
     pub fn make_runtime() -> Runtime {
         Builder::new().enable_all().basic_scheduler().build().unwrap()
     }
@@ -321,7 +353,7 @@ pub mod test {
     ///
     /// let mut body = Body::from("some body");
     /// let read = read_body(&mut body);
-    /// assert_eq!(read.as_slice(), "some body".as_bytes());
+    /// assert_eq!(read.as_slice(), b"some body");
     /// ```
     pub fn read_body(body: &mut Body) -> Vec<u8> {
         make_runtime().block_on(async { crate::read_body(body, None).await.unwrap().unwrap() })
@@ -340,7 +372,8 @@ pub mod test {
                 .await
                 .unwrap()
         });
-        assert_eq!(read, Some(b"this is ok".to_vec()));
+        assert!(read.is_some());
+        assert_eq!(read.unwrap().as_slice(), b"this is ok");
     }
 
     #[test]
@@ -389,17 +422,17 @@ pub mod test {
     fn test_trace_id_header() {
         use hyper::header::HeaderValue;
 
-        assert_eq!(HeaderName::from_static("x-trace-id"), TRACE_ID_HEADER.name());
-        assert_eq!("X-TRACE-ID", &TRACE_ID_HEADER.upper());
+        assert_eq!(HeaderName::from_static("x-trace-id"), TraceIdHeader::name());
+        assert_eq!("X-TRACE-ID", &TraceIdHeader::upper());
 
         let mut headers = HeaderMap::new();
-        assert_eq!(TRACE_ID_HEADER.get(&headers), None);
+        assert_eq!(TraceIdHeader::get(&headers), None);
         headers.insert(
-            TRACE_ID_HEADER.name(),
+            TraceIdHeader::name(),
             HeaderValue::from_static("2e372a3a-9dff-4c61-8678-753bbdf4295e"),
         );
         assert_eq!(
-            TRACE_ID_HEADER.get(&headers),
+            TraceIdHeader::get(&headers),
             Some("2e372a3a-9dff-4c61-8678-753bbdf4295e".parse().unwrap())
         );
     }

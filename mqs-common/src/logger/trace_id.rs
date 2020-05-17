@@ -2,7 +2,7 @@ use hyper::{Body, Request};
 use tokio::macros::support::Future;
 use uuid::Uuid;
 
-use crate::TRACE_ID_HEADER;
+use crate::TraceIdHeader;
 
 task_local!(
     static TRACE_ID: Uuid;
@@ -26,6 +26,7 @@ task_local!(
 ///     .await;
 /// });
 /// ```
+#[must_use]
 pub fn get_trace_id() -> Option<Uuid> {
     match TRACE_ID.try_with(|trace_id| *trace_id) {
         Err(_) => None,
@@ -58,7 +59,7 @@ pub fn get_trace_id() -> Option<Uuid> {
 ///     assert_eq!(get_trace_id(), None);
 /// });
 /// ```
-pub async fn with_trace_id<F: Future>(id: Uuid, f: F) -> F::Output {
+pub async fn with_trace_id<F: Future + Send>(id: Uuid, f: F) -> F::Output {
     TRACE_ID.scope(id, f).await
 }
 
@@ -68,20 +69,20 @@ pub async fn with_trace_id<F: Future>(id: Uuid, f: F) -> F::Output {
 /// ```
 /// use http::{HeaderValue, Request};
 /// use hyper::Body;
-/// use mqs_common::{logger::create_trace_id, TRACE_ID_HEADER};
+/// use mqs_common::{logger::create_trace_id, TraceIdHeader};
 ///
 /// let mut req = Request::new(Body::default());
 /// // random trace id as we did not supply any headers
 /// let trace_id = create_trace_id(&req);
 /// req.headers_mut().insert(
-///     TRACE_ID_HEADER.name(),
+///     TraceIdHeader::name(),
 ///     HeaderValue::from_str(&trace_id.to_string()).unwrap(),
 /// );
 /// // we get back whatever we set as X-TRACE-ID header
 /// assert_eq!(create_trace_id(&req), trace_id);
 /// ```
 pub fn create_trace_id(req: &Request<Body>) -> Uuid {
-    TRACE_ID_HEADER.get(req.headers()).unwrap_or_else(Uuid::new_v4)
+    TraceIdHeader::get(req.headers()).unwrap_or_else(Uuid::new_v4)
 }
 
 #[cfg(test)]

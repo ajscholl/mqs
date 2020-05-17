@@ -53,6 +53,7 @@ impl<R: QueueRepository + MessageRepository, S: Source<R>> WildcardRouter<(R, S)
 }
 
 /// Create a new instance of the router.
+#[must_use]
 pub fn make_router<R: QueueRepository + MessageRepository + HealthCheckRepository, S: Source<R>>() -> Router<(R, S)> {
     Router::default()
         .with_route_simple("health", Method::GET, HealthHandler)
@@ -110,14 +111,14 @@ mod test {
             let mut response = run_handler(handler.clone(), &repo);
             assert_eq!(StatusCode::from(Status::Ok), response.status());
             let body = read_body(response.body_mut());
-            assert_eq!(body, b"green".to_vec());
+            assert_eq!(body.as_slice(), b"green");
         }
         {
             repo.lock().unwrap().set_health(false);
             let mut response = run_handler(handler, &repo);
             assert_eq!(StatusCode::from(Status::Ok), response.status());
             let body = read_body(response.body_mut());
-            assert_eq!(body, b"red".to_vec());
+            assert_eq!(body.as_slice(), b"red");
         }
     }
 
@@ -132,16 +133,14 @@ mod test {
             let mut response = run_handler_with(
                 create_handler.clone(),
                 &repo,
-                "{\"retention_timeout\": 600, \"visibility_timeout\": 30, \"message_delay\": 5, \"message_deduplication\": false}"
-                    .as_bytes()
+                b"{\"retention_timeout\": 600, \"visibility_timeout\": 30, \"message_delay\": 5, \"message_deduplication\": false}"
                     .to_vec(),
             );
             assert_eq!(StatusCode::from(Status::Created), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(
                 body,
-                "{\"name\":\"my-queue\",\"redrive_policy\":null,\"retention_timeout\":600,\"visibility_timeout\":30,\"message_delay\":5,\"message_deduplication\":false}"
-                    .as_bytes()
+                b"{\"name\":\"my-queue\",\"redrive_policy\":null,\"retention_timeout\":600,\"visibility_timeout\":30,\"message_delay\":5,\"message_deduplication\":false}"
                     .to_vec(),
             );
         }
@@ -149,8 +148,7 @@ mod test {
             let mut response = run_handler_with(
                 create_handler,
                 &repo,
-                "{\"retention_timeout\": 600, \"visibility_timeout\": 60, \"message_delay\": 5, \"message_deduplication\": false}"
-                    .as_bytes()
+                b"{\"retention_timeout\": 600, \"visibility_timeout\": 60, \"message_delay\": 5, \"message_deduplication\": false}"
                     .to_vec(),
             );
             assert_eq!(StatusCode::from(Status::Conflict), response.status());
@@ -166,8 +164,7 @@ mod test {
             let body = read_body(response.body_mut());
             assert_eq!(
                 body,
-                "{\"name\":\"my-queue\",\"redrive_policy\":null,\"retention_timeout\":600,\"visibility_timeout\":30,\"message_delay\":5,\"message_deduplication\":false,\"status\":{\"messages\":0,\"visible_messages\":0,\"oldest_message_age\":0}}"
-                    .as_bytes()
+                b"{\"name\":\"my-queue\",\"redrive_policy\":null,\"retention_timeout\":600,\"visibility_timeout\":30,\"message_delay\":5,\"message_deduplication\":false,\"status\":{\"messages\":0,\"visible_messages\":0,\"oldest_message_age\":0}}"
                     .to_vec(),
             );
         }
@@ -180,8 +177,7 @@ mod test {
             let body = read_body(response.body_mut());
             assert_eq!(
                 body,
-                "{\"queues\":[{\"name\":\"my-queue\",\"redrive_policy\":null,\"retention_timeout\":600,\"visibility_timeout\":30,\"message_delay\":5,\"message_deduplication\":false}],\"total\":1}"
-                    .as_bytes()
+                b"{\"queues\":[{\"name\":\"my-queue\",\"redrive_policy\":null,\"retention_timeout\":600,\"visibility_timeout\":30,\"message_delay\":5,\"message_deduplication\":false}],\"total\":1}"
                     .to_vec(),
             );
         }
@@ -192,16 +188,14 @@ mod test {
             let mut response = run_handler_with(
                 update_handler,
                 &repo,
-                "{\"retention_timeout\": 30, \"visibility_timeout\": 10, \"message_delay\": 2, \"message_deduplication\": true}"
-                    .as_bytes()
+                b"{\"retention_timeout\": 30, \"visibility_timeout\": 10, \"message_delay\": 2, \"message_deduplication\": true}"
                     .to_vec(),
             );
             assert_eq!(StatusCode::from(Status::Ok), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(
                 body,
-                "{\"name\":\"my-queue\",\"redrive_policy\":null,\"retention_timeout\":30,\"visibility_timeout\":10,\"message_delay\":2,\"message_deduplication\":true}"
-                    .as_bytes()
+                b"{\"name\":\"my-queue\",\"redrive_policy\":null,\"retention_timeout\":30,\"visibility_timeout\":10,\"message_delay\":2,\"message_deduplication\":true}"
                     .to_vec(),
             );
         }
@@ -214,8 +208,7 @@ mod test {
             let body = read_body(response.body_mut());
             assert_eq!(
                 body,
-                "{\"name\":\"my-queue\",\"redrive_policy\":null,\"retention_timeout\":30,\"visibility_timeout\":10,\"message_delay\":2,\"message_deduplication\":true}"
-                    .as_bytes()
+                b"{\"name\":\"my-queue\",\"redrive_policy\":null,\"retention_timeout\":30,\"visibility_timeout\":10,\"message_delay\":2,\"message_deduplication\":true}"
                     .to_vec(),
             );
         }
@@ -258,7 +251,7 @@ mod test {
             let mut response = run_handler(receive_handler, &repo);
             assert_eq!(StatusCode::from(Status::Ok), response.status());
             let body = read_body(response.body_mut());
-            assert_eq!(body, b"{\"content\": \"my message\"}".to_vec());
+            assert_eq!(body.as_slice(), b"{\"content\": \"my message\"}");
             let response_message_id = response.headers().get(HeaderName::from_static("x-mqs-message-id"));
             assert!(response_message_id.is_some());
             response_message_id.unwrap().to_str().unwrap().to_string()

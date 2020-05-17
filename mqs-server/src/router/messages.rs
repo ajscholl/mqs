@@ -5,7 +5,7 @@ use mqs_common::{get_header, router::Handler};
 use crate::{
     connection::Source,
     models::{message::MessageRepository, queue::QueueRepository},
-    routes::messages::{delete_message, publish_messages, receive_messages, MaxWaitTime, MessageCount},
+    routes::messages::{delete, publish, receive, MaxWaitTime, MessageCount},
 };
 
 pub struct ReceiveMessagesHandler {
@@ -61,7 +61,7 @@ impl<R: MessageRepository + QueueRepository, S: Source<R>> Handler<(R, S)> for R
                 Ok(None)
             }
         };
-        receive_messages(repo, repo_source, &self.queue_name, message_count, max_wait_time)
+        receive(repo, repo_source, &self.queue_name, message_count, max_wait_time)
             .await
             .into_response()
     }
@@ -79,7 +79,7 @@ impl<R: MessageRepository + QueueRepository, S: Send> Handler<(R, S)> for Publis
         S: 'async_trait,
     {
         let (parts, _) = req.into_parts();
-        publish_messages(repo, &self.queue_name, body.as_slice(), parts.headers)
+        publish(repo, &self.queue_name, body.as_slice(), parts.headers)
             .await
             .into_response()
     }
@@ -92,6 +92,6 @@ impl<R: MessageRepository, S: Send> Handler<(R, S)> for DeleteMessageHandler {
         R: 'async_trait,
         S: 'async_trait,
     {
-        delete_message(repo, &self.message_id).into_response()
+        delete(&repo, &self.message_id).into_response()
     }
 }

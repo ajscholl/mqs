@@ -3,7 +3,7 @@ use hyper::{
     Body,
     HeaderMap,
 };
-use mqs_common::{multipart, Status, TRACE_ID_HEADER};
+use mqs_common::{multipart, Status, TraceIdHeader};
 use serde::Serialize;
 
 use crate::models::message::Message;
@@ -12,28 +12,28 @@ pub mod messages;
 pub mod queues;
 
 #[derive(Serialize, Debug, Clone, Copy)]
-pub(crate) struct ErrorResponse<'a> {
+pub struct ErrorResponse<'a> {
     error: &'a str,
 }
 
 #[derive(Debug)]
-pub(crate) enum MqsResponse {
+pub enum MqsResponse {
     Status(Status),
     Json(Status, String),
     Message(Status, Vec<Message>),
 }
 
 impl MqsResponse {
-    pub(crate) fn status(status: Status) -> Self {
-        MqsResponse::Status(status)
+    pub(crate) const fn status(status: Status) -> Self {
+        Self::Status(status)
     }
 
     pub(crate) fn error_static(error: &'static str) -> Self {
         Self::status_json(Status::BadRequest, &ErrorResponse { error })
     }
 
-    pub(crate) fn error_owned(error: String) -> Self {
-        Self::status_json(Status::BadRequest, &ErrorResponse { error: &error })
+    pub(crate) fn error_owned(error: &str) -> Self {
+        Self::status_json(Status::BadRequest, &ErrorResponse { error })
     }
 
     pub(crate) fn json<T: Serialize>(body: &T) -> Self {
@@ -45,31 +45,31 @@ impl MqsResponse {
             Err(err) => {
                 error!("Failed to serialize json response: {}", err);
 
-                MqsResponse::Status(Status::InternalServerError)
+                Self::Status(Status::InternalServerError)
             },
-            Ok(json) => MqsResponse::Json(status, json),
+            Ok(json) => Self::Json(status, json),
         }
     }
 
     pub(crate) fn messages(messages: Vec<Message>) -> Self {
-        MqsResponse::Message(Status::Ok, messages)
+        Self::Message(Status::Ok, messages)
     }
 
     pub(crate) fn into_response(self) -> hyper::Response<Body> {
         match self {
-            MqsResponse::Status(status) => {
+            Self::Status(status) => {
                 let mut res = hyper::Response::new(Body::default());
                 *res.status_mut() = status.into();
                 res
             },
-            MqsResponse::Json(status, body) => {
+            Self::Json(status, body) => {
                 let mut res = hyper::Response::new(Body::from(body));
                 *res.status_mut() = status.into();
                 res.headers_mut()
                     .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
                 res
             },
-            MqsResponse::Message(status, mut messages) => {
+            Self::Message(status, mut messages) => {
                 if messages.len() == 1 {
                     let message = messages.pop().unwrap();
 
@@ -109,7 +109,7 @@ impl MqsResponse {
         }
         if let Some(trace_id) = message.trace_id {
             if let Ok(value) = HeaderValue::from_str(&trace_id.to_string()) {
-                headers.insert(TRACE_ID_HEADER.name(), value);
+                headers.insert(TraceIdHeader::name(), value);
             }
         }
         if let Ok(value) = HeaderValue::from_str(&message.id.to_string()) {
@@ -137,10 +137,7 @@ pub(crate) mod test {
         let json = "{\"error\":\"test\"}";
         let mut responses = [
             (Status::BadRequest, MqsResponse::error_static("test").into_response()),
-            (
-                Status::BadRequest,
-                MqsResponse::error_owned("test".to_string()).into_response(),
-            ),
+            (Status::BadRequest, MqsResponse::error_owned("test").into_response()),
             (
                 Status::Ok,
                 MqsResponse::json(&ErrorResponse { error: "test" }).into_response(),

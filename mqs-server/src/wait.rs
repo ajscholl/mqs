@@ -1,5 +1,5 @@
 use cached::once_cell::sync::Lazy;
-use std::{collections::HashMap, ops::DerefMut, time::Duration};
+use std::{collections::HashMap, time::Duration};
 use tokio::{
     sync::{oneshot, oneshot::Sender, Mutex},
     time::timeout,
@@ -10,18 +10,18 @@ use crate::models::queue::Queue;
 
 type MessageWaitQueueMap = HashMap<String, HashMap<Uuid, Sender<()>>>;
 
-pub(crate) struct MessageWaitQueue {
+pub struct MessageWaitQueue {
     wait_queue: Mutex<MessageWaitQueueMap>,
 }
 
 impl MessageWaitQueue {
-    pub(crate) fn new() -> Self {
-        MessageWaitQueue {
+    pub fn new() -> Self {
+        Self {
             wait_queue: Mutex::new(HashMap::new()),
         }
     }
 
-    pub(crate) async fn wait(&self, queue: &Queue, max_wait_time: u64) -> bool {
+    pub async fn wait(&self, queue: &Queue, max_wait_time: u64) -> bool {
         let (tx, rx) = oneshot::channel();
         let queue_name = queue.name.to_string();
         let id = Uuid::new_v4();
@@ -34,7 +34,7 @@ impl MessageWaitQueue {
                 id.to_string()
             );
             let mut guard = self.wait_queue.lock().await;
-            let map: &mut MessageWaitQueueMap = guard.deref_mut();
+            let map: &mut MessageWaitQueueMap = &mut *guard;
             match map.get_mut(&queue_name) {
                 None => {
                     let mut waiting = HashMap::new();
@@ -58,7 +58,7 @@ impl MessageWaitQueue {
 
         {
             let mut guard = self.wait_queue.lock().await;
-            let map: &mut MessageWaitQueueMap = guard.deref_mut();
+            let map: &mut MessageWaitQueueMap = &mut *guard;
             match map.get_mut(&queue_name) {
                 None => {
                     error!(
@@ -84,9 +84,9 @@ impl MessageWaitQueue {
         found
     }
 
-    pub(crate) async fn signal(&self, queue: &Queue) {
+    pub async fn signal(&self, queue: &Queue) {
         let mut guard = self.wait_queue.lock().await;
-        let map: &mut MessageWaitQueueMap = guard.deref_mut();
+        let map: &mut MessageWaitQueueMap = &mut *guard;
         match map.get_mut(&queue.name.to_string()) {
             None => {
                 debug!("Not signaling on queue {}: No waiting entries", &queue.name);
@@ -114,10 +114,10 @@ impl MessageWaitQueue {
     }
 }
 
-pub(crate) static MESSAGE_WAIT_QUEUE: Lazy<MessageWaitQueue> = Lazy::new(MessageWaitQueue::new);
+pub static MESSAGE_WAIT_QUEUE: Lazy<MessageWaitQueue> = Lazy::new(MessageWaitQueue::new);
 
 #[cfg(test)]
-pub(crate) mod test {
+pub mod test {
     use super::*;
     use crate::models::queue::pg_interval;
     use chrono::Utc;

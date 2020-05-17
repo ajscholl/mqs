@@ -40,7 +40,7 @@ pub struct Router<A> {
 impl<A> Default for Router<A> {
     /// Create a new empty router. The router does not route any requests initially.
     fn default() -> Self {
-        Router {
+        Self {
             handler:         HashMap::new(),
             wildcard_router: None,
             sub_router:      HashMap::new(),
@@ -103,7 +103,8 @@ impl<A> Router<A> {
 
     /// Create a new router from the current router with a new route handled by the given router.
     /// Panics if the router already has a router set for that route.
-    pub fn with_route(mut self, route: &'static str, router: Router<A>) -> Self {
+    #[must_use]
+    pub fn with_route(mut self, route: &'static str, router: Self) -> Self {
         if let Some(_existing) = self.sub_router.insert(route, router) {
             panic!("Overwrote existing route {}", route);
         }

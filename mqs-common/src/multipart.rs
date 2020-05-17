@@ -46,12 +46,12 @@ pub fn encode<I: Iterator<Item = (HeaderMap, Vec<u8>)>>(messages: I) -> (String,
 /// assert_eq!(is_multipart("multipart/other; boundary=\"abc def\""), None);
 /// assert_eq!(is_multipart("test/plain"), None);
 /// ```
+#[must_use]
 pub fn is_multipart(content_type: &str) -> Option<String> {
     let (top, rest) = {
         let mut i = content_type.splitn(2, '/');
         let top = i.next();
         let rest = i.next();
-        debug_assert!(i.next().is_none());
         match (top, rest) {
             (Some(top), Some(rest)) => (top, rest),
             _ => return None,
@@ -61,12 +61,11 @@ pub fn is_multipart(content_type: &str) -> Option<String> {
         return None;
     }
 
-    for param in rest.split(';').into_iter() {
+    for param in rest.split(';') {
         let (key, value) = {
             let mut i = param.splitn(2, '=');
             let key = i.next();
             let value = i.next();
-            debug_assert!(i.next().is_none());
             match (key, value) {
                 (Some(key), Some(value)) => (key.trim(), {
                     let trimmed = value.trim();
@@ -89,37 +88,41 @@ pub fn is_multipart(content_type: &str) -> Option<String> {
 
 /// Error returned in case a slice is not a valid multipart document.
 #[derive(Debug, Clone, Copy)]
-pub enum ParseError {
+pub enum InvalidMultipart {
     /// There was invalid data after a boundary.
-    InvalidChunk,
+    Chunk,
     /// An invalid header name was encountered in some chunk.
-    InvalidHeaderName,
+    HeaderName,
     /// An invalid header value was encountered in some chunk.
-    InvalidHeaderValue,
+    HeaderValue,
 }
 
-impl Display for ParseError {
+impl Display for InvalidMultipart {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self)
     }
 }
 
-impl Error for ParseError {}
+impl Error for InvalidMultipart {}
 
-impl From<InvalidHeaderName> for ParseError {
+impl From<InvalidHeaderName> for InvalidMultipart {
     fn from(_: InvalidHeaderName) -> Self {
-        ParseError::InvalidHeaderName
+        Self::HeaderName
     }
 }
 
-impl From<InvalidHeaderValue> for ParseError {
+impl From<InvalidHeaderValue> for InvalidMultipart {
     fn from(_: InvalidHeaderValue) -> Self {
-        ParseError::InvalidHeaderValue
+        Self::HeaderValue
     }
 }
 
 /// Split a message body at the boundaries and return a list of content-type/data pairs
-pub fn parse<'a, 'b>(boundary: &'b [u8], body: &'a [u8]) -> Result<Vec<(HeaderMap, &'a [u8])>, ParseError> {
+///
+/// # Errors
+///
+/// If any part of the document fails to parse (invalid chunk, header name or header value).
+pub fn parse<'a, 'b>(boundary: &'b [u8], body: &'a [u8]) -> Result<Vec<(HeaderMap, &'a [u8])>, InvalidMultipart> {
     let mut result = Vec::new();
 
     let mut skipped_preamble = false;
@@ -127,11 +130,10 @@ pub fn parse<'a, 'b>(boundary: &'b [u8], body: &'a [u8]) -> Result<Vec<(HeaderMa
         if !skipped_preamble {
             skipped_preamble = true;
 
-            if !document.starts_with(boundary) {
-                // if we start with the boundary, there was no preamble, but also no leading CRLF
-                continue;
-            } else {
+            if document.starts_with(boundary) {
                 document = &document[boundary.len()..];
+            } else {
+                continue;
             }
         }
 
@@ -142,7 +144,7 @@ pub fn parse<'a, 'b>(boundary: &'b [u8], body: &'a [u8]) -> Result<Vec<(HeaderMa
 
         if !document.starts_with(b"\r\n") {
             // invalid chunk, signal bad request
-            return Err(ParseError::InvalidChunk);
+            return Err(InvalidMultipart::Chunk);
         }
 
         // remove initial CRLF
@@ -327,7 +329,7 @@ fn trim_bytes(data: &[u8]) -> &[u8] {
         end -= 1;
     }
 
-    &data[start..end + 1]
+    &data[start..=end]
 }
 
 // How much linear whitespace should we skip from the beginning of the buffer (see rfc5234 for a definition)?
@@ -345,8 +347,7 @@ fn skip_linear_whitespace(data: &[u8]) -> usize {
 
     while data.len() > pos {
         match data[pos] {
-            0x20 => pos += 1,
-            0x09 => pos += 1,
+            0x20 | 0x09 => pos += 1,
             0x0D => {
                 if data.len() >= pos + 3 && data[pos + 1] == 0x0A && (data[pos + 2] == 0x20 || data[pos + 2] == 0x09) {
                     pos += 3;

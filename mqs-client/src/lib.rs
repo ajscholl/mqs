@@ -25,19 +25,14 @@
 //! on some host, you could write the following:
 //!
 //! ```
-//! #[macro_use]
-//! extern crate tokio;
-//!
 //! use mqs_client::Service;
 //! use tokio::runtime::Builder;
 //!
-//! fn main() {
-//!     let service = Service::new("https://mqs.example.com:7843");
+//! let service = Service::new("https://mqs.example.com:7843");
 //!
-//!     let mut rt = Builder::new().enable_all().threaded_scheduler().build().unwrap();
-//!     let success = rt.block_on(async { service.check_health().await });
-//!     assert!(!success.is_ok());
-//! }
+//! let mut rt = Builder::new().enable_all().threaded_scheduler().build().unwrap();
+//! let success = rt.block_on(async { service.check_health().await });
+//! assert!(!success.is_ok());
 //! ```
 
 use hyper::{
@@ -58,8 +53,8 @@ use mqs_common::{
     QueueDescriptionOutput,
     QueuesResponse,
     Status::ServiceUnavailable,
+    TraceIdHeader,
     DEFAULT_CONTENT_TYPE,
-    TRACE_ID_HEADER,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
@@ -83,7 +78,7 @@ pub enum ClientError {
     /// A value could not converted to a header value because it contained invalid characters.
     InvalidHeaderValue(hyper::header::InvalidHeaderValue),
     /// The server returned an invalid multipart response.
-    MultipartParseError(multipart::ParseError),
+    MultipartParseError(multipart::InvalidMultipart),
     /// The server returned an error status code.
     ServiceError(u16),
     /// The response returned by the server was larger than what the client was configured to accept.
@@ -102,37 +97,37 @@ impl Error for ClientError {}
 
 impl From<hyper::Error> for ClientError {
     fn from(error: hyper::Error) -> Self {
-        ClientError::HyperError(error)
+        Self::HyperError(error)
     }
 }
 
 impl From<hyper::http::uri::InvalidUri> for ClientError {
     fn from(error: hyper::http::uri::InvalidUri) -> Self {
-        ClientError::InvalidUri(error)
+        Self::InvalidUri(error)
     }
 }
 
 impl From<std::io::Error> for ClientError {
     fn from(error: std::io::Error) -> Self {
-        ClientError::IoError(error)
+        Self::IoError(error)
     }
 }
 
 impl From<serde_json::error::Error> for ClientError {
     fn from(error: serde_json::error::Error) -> Self {
-        ClientError::ParseError(error)
+        Self::ParseError(error)
     }
 }
 
 impl From<hyper::header::InvalidHeaderValue> for ClientError {
     fn from(error: hyper::header::InvalidHeaderValue) -> Self {
-        ClientError::InvalidHeaderValue(error)
+        Self::InvalidHeaderValue(error)
     }
 }
 
-impl From<multipart::ParseError> for ClientError {
-    fn from(error: multipart::ParseError) -> Self {
-        ClientError::MultipartParseError(error)
+impl From<multipart::InvalidMultipart> for ClientError {
+    fn from(error: multipart::InvalidMultipart) -> Self {
+        Self::MultipartParseError(error)
     }
 }
 
@@ -173,7 +168,7 @@ impl<'a> PublishableMessage<'a> {
 
         if let Some(trace_id) = self.trace_id {
             if let Ok(trace_id) = HeaderValue::from_str(&trace_id.to_string()) {
-                headers.insert(TRACE_ID_HEADER.name(), trace_id);
+                headers.insert(TraceIdHeader::name(), trace_id);
             }
         }
 
@@ -206,8 +201,9 @@ impl Service {
     ///
     /// let _service = Service::new("https://mqs.example.com:7843");
     /// ```
-    pub fn new(host: &str) -> Service {
-        Service {
+    #[must_use]
+    pub fn new(host: &str) -> Self {
+        Self {
             client:        Client::new(),
             host:          host.to_string(),
             max_body_size: Some(Self::DEFAULT_MAX_BODY_SIZE),
@@ -245,7 +241,7 @@ impl Service {
             .insert(CONNECTION, HeaderValue::from_static("keep-alive"));
         if let Some(trace_id) = trace_id {
             if let Ok(value) = HeaderValue::from_str(&trace_id.to_string()) {
-                req.headers_mut().insert(TRACE_ID_HEADER.name(), value);
+                req.headers_mut().insert(TraceIdHeader::name(), value);
             }
         }
         Ok(req)
@@ -272,7 +268,10 @@ impl Service {
         }
     }
 
-    async fn request<E, F: Fn() -> Result<Request<Body>, E>>(&self, builder: F) -> Result<Response<Body>, ClientError>
+    async fn request<E: Send, F: Sync + Send + Fn() -> Result<Request<Body>, E>>(
+        &self,
+        builder: F,
+    ) -> Result<Response<Body>, ClientError>
     where
         ClientError: From<E>,
     {
@@ -284,7 +283,7 @@ impl Service {
         }
     }
 
-    async fn json_request<T: Serialize>(
+    async fn json_request<T: Serialize + Sync>(
         &self,
         method: Method,
         uri: &str,
@@ -325,6 +324,10 @@ impl Service {
     ///         .await
     /// }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or the server returns an invalid response.
     pub async fn create_queue(
         &self,
         queue_name: &str,
@@ -360,6 +363,10 @@ impl Service {
     ///         .await
     /// }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or the server returns an invalid response.
     pub async fn update_queue(
         &self,
         queue_name: &str,
@@ -382,6 +389,10 @@ impl Service {
     ///     service.delete_queue("existing-queue", None).await
     /// }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or the server returns an invalid response.
     pub async fn delete_queue(
         &self,
         queue_name: &str,
@@ -416,6 +427,10 @@ impl Service {
     ///     Ok(())
     /// }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or the server returns an invalid response.
     pub async fn get_queues(
         &self,
         trace_id: Option<Uuid>,
@@ -461,6 +476,10 @@ impl Service {
     ///     Ok(description.map_or_else(|| false, |description| description.redrive_policy.is_some()))
     /// }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or the server returns an invalid response.
     pub async fn describe_queue(
         &self,
         queue_name: &str,
@@ -493,6 +512,10 @@ impl Service {
     ///     }
     /// }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or the server returns an invalid status.
     pub async fn get_message(
         &self,
         queue_name: &str,
@@ -517,7 +540,7 @@ impl Service {
         let content_encoding = headers
             .get(CONTENT_ENCODING)
             .map_or_else(|| None, |h| h.to_str().map_or_else(|_| None, |s| Some(s.to_string())));
-        let trace_id = TRACE_ID_HEADER.get(&headers);
+        let trace_id = TraceIdHeader::get(headers);
         let content = get_body()?;
         Ok(MessageResponse {
             message_id,
@@ -551,6 +574,10 @@ impl Service {
     ///     Ok(count)
     /// }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or the server returns an invalid status.
     pub async fn get_messages(
         &self,
         queue_name: &str,
@@ -622,6 +649,10 @@ impl Service {
     ///     service.publish_message("my-queue", message).await
     /// }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or the server returns an invalid status.
     pub async fn publish_message(
         &self,
         queue_name: &str,
@@ -632,7 +663,7 @@ impl Service {
             .request(|| {
                 let (headers, body) = message.clone().encode();
                 let mut req = Self::new_request(Method::POST, &uri, None, Body::from(body))?;
-                for (key, value) in headers.into_iter() {
+                for (key, value) in headers {
                     // we never get the same header twice from PublishableMessage::encode, so we
                     // can just ignore that case
                     if let Some(key) = key {
@@ -670,6 +701,10 @@ impl Service {
     ///     service.publish_messages("my-queue", &messages).await
     /// }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or the server returns an invalid status.
     pub async fn publish_messages(
         &self,
         queue_name: &str,
@@ -717,6 +752,10 @@ impl Service {
     ///     }
     /// }
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails or the server returns an invalid status.
     pub async fn delete_message(&self, trace_id: Option<Uuid>, message_id: &str) -> Result<bool, ClientError> {
         let uri = format!("{}/messages/{}", &self.host, message_id);
         let response = self
@@ -733,20 +772,20 @@ impl Service {
     /// healthy, `HealthCheckError` if the service responded with an invalid status.
     ///
     /// ```
-    /// #[macro_use]
-    /// extern crate tokio;
-    ///
     /// use mqs_client::Service;
     /// use tokio::runtime::Builder;
     ///
-    /// fn main() {
-    ///     let service = Service::new("https://mqs.example.com:7843");
+    /// let service = Service::new("https://mqs.example.com:7843");
     ///
-    ///     let mut rt = Builder::new().enable_all().threaded_scheduler().build().unwrap();
-    ///     let success = rt.block_on(async { service.check_health().await });
-    ///     assert!(!success.is_ok());
-    /// }
+    /// let mut rt = Builder::new().enable_all().threaded_scheduler().build().unwrap();
+    /// let success = rt.block_on(async { service.check_health().await });
+    /// assert!(!success.is_ok());
     /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the request fails, the server returns a status different from 200, or a
+    /// response different from "green" or "red".
     pub async fn check_health(&self) -> Result<bool, ClientError> {
         let uri = format!("{}/health", &self.host);
         let mut response = self
@@ -810,7 +849,7 @@ mod test {
                     headers.insert(CONTENT_TYPE, HeaderValue::from_static("type"));
                     headers.insert(CONTENT_ENCODING, HeaderValue::from_static("encoding"));
                     headers.insert(
-                        TRACE_ID_HEADER.name(),
+                        TraceIdHeader::name(),
                         HeaderValue::from_static("96a372de-2db0-405b-a49e-fbcddcabefdb"),
                     );
                     headers
@@ -854,9 +893,9 @@ mod test {
         let err = ClientError::from(invalid_header_error);
         assert_eq!(format!("{}", err), "InvalidHeaderValue(InvalidHeaderValue)");
 
-        let parse_error = multipart::ParseError::InvalidChunk;
+        let parse_error = multipart::InvalidMultipart::Chunk;
         let err = ClientError::from(parse_error);
-        assert_eq!(format!("{}", err), "MultipartParseError(InvalidChunk)");
+        assert_eq!(format!("{}", err), "MultipartParseError(Chunk)");
     }
 
     #[test]

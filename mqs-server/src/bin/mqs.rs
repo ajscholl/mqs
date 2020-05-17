@@ -27,16 +27,7 @@ use hyper::{
     Server,
 };
 use log::{Level, Log};
-use std::{
-    convert::Infallible,
-    env,
-    env::VarError,
-    io::Stdout,
-    net::SocketAddr,
-    ops::Deref,
-    sync::Arc,
-    time::Duration,
-};
+use std::{convert::Infallible, env, env::VarError, io::Stdout, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{runtime::Builder, time::delay_for};
 
 use mqs_common::{
@@ -61,7 +52,7 @@ struct RepoSource {
 
 impl RepoSource {
     const fn new(pool: Arc<Pool>) -> Self {
-        RepoSource { pool }
+        Self { pool }
     }
 }
 
@@ -74,14 +65,14 @@ impl Source<PgRepository> for RepoSource {
 
 impl HandlerService {
     fn new(pool: Pool, router: Router<(PgRepository, RepoSource)>, max_message_size: usize) -> Self {
-        HandlerService {
+        Self {
             pool: Arc::new(pool),
             router,
             max_message_size,
         }
     }
 
-    async fn handle(&self, req: Request<Body>) -> Result<Response<Body>, Infallible> {
+    async fn handle(&self, req: Request<Body>) -> Response<Body> {
         let repo = match self.pool.get() {
             Err(_) => None,
             Ok(conn) => Some(PgRepository::new(conn)),
@@ -118,10 +109,10 @@ fn get_max_message_size() -> usize {
 }
 
 fn main() {
-    dotenv().ok();
-
     static LOGGER: Lazy<Logger<Stdout>, NewJsonLogger> = Lazy::new(NewJsonLogger::new(Level::Info));
-    configure_logger(LOGGER.deref());
+
+    dotenv().ok();
+    configure_logger(&*LOGGER);
 
     let (pool, pool_size) = init_pool_maybe().expect("Failed to initialize database pool");
     let mut rt = Builder::new()
@@ -150,7 +141,7 @@ fn main() {
                 Ok::<_, Infallible>(service_fn(move |req| {
                     let req_service = Arc::clone(&conn_service);
                     let id = create_trace_id(&req);
-                    async move { with_trace_id(id, req_service.handle(req)).await }
+                    async move { Ok::<_, Infallible>(with_trace_id(id, req_service.handle(req)).await) }
                 }))
             }
         });

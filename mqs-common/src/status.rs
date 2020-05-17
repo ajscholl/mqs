@@ -25,13 +25,23 @@ pub enum Status {
 
 impl From<&Status> for StatusCode {
     fn from(status: &Status) -> Self {
-        StatusCode::from_u16(*status as u16).unwrap()
+        match status {
+            Status::Ok => Self::OK,
+            Status::Created => Self::CREATED,
+            Status::NoContent => Self::NO_CONTENT,
+            Status::BadRequest => Self::BAD_REQUEST,
+            Status::NotFound => Self::NOT_FOUND,
+            Status::Conflict => Self::CONFLICT,
+            Status::PayloadTooLarge => Self::PAYLOAD_TOO_LARGE,
+            Status::InternalServerError => Self::INTERNAL_SERVER_ERROR,
+            Status::ServiceUnavailable => Self::SERVICE_UNAVAILABLE,
+        }
     }
 }
 
 impl From<Status> for StatusCode {
     fn from(status: Status) -> Self {
-        StatusCode::from(&status)
+        Self::from(&status)
     }
 }
 

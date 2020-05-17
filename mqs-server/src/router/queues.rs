@@ -3,10 +3,7 @@ use hyper::{Body, Request, Response};
 use mqs_common::router::Handler;
 use std::convert::TryInto;
 
-use crate::{
-    models::queue::QueueRepository,
-    routes::queues::{delete_queue, describe_queue, list_queues, new_queue, update_queue},
-};
+use crate::{models::queue::QueueRepository, routes::queues};
 
 pub struct DescribeQueueHandler {
     pub queue_name: String,
@@ -33,7 +30,7 @@ impl<R: QueueRepository, S: Send> Handler<(R, S)> for DescribeQueueHandler {
         R: 'async_trait,
         S: 'async_trait,
     {
-        describe_queue(repo, &self.queue_name).into_response()
+        queues::describe(&repo, &self.queue_name).into_response()
     }
 }
 
@@ -49,7 +46,7 @@ impl<R: QueueRepository, S: Send> Handler<(R, S)> for CreateQueueHandler {
         S: 'async_trait,
     {
         let params = serde_json::from_slice(body.as_slice());
-        new_queue(repo, &self.queue_name, params).into_response()
+        queues::new(&repo, &self.queue_name, params).into_response()
     }
 }
 
@@ -65,7 +62,7 @@ impl<R: QueueRepository, S: Send> Handler<(R, S)> for UpdateQueueHandler {
         S: 'async_trait,
     {
         let params = serde_json::from_slice(body.as_slice());
-        update_queue(repo, &self.queue_name, params).into_response()
+        queues::update(&repo, &self.queue_name, params).into_response()
     }
 }
 
@@ -76,7 +73,7 @@ impl<R: QueueRepository, S: Send> Handler<(R, S)> for DeleteQueueHandler {
         R: 'async_trait,
         S: 'async_trait,
     {
-        delete_queue(repo, &self.queue_name).into_response()
+        queues::delete(&repo, &self.queue_name).into_response()
     }
 }
 
@@ -87,6 +84,6 @@ impl<R: QueueRepository, S: Send> Handler<(R, S)> for ListQueuesHandler {
         R: 'async_trait,
         S: 'async_trait,
     {
-        list_queues(repo, (&req).try_into()).into_response()
+        queues::list(&repo, (&req).try_into()).into_response()
     }
 }

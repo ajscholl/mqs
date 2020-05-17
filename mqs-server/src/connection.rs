@@ -9,7 +9,7 @@ use r2d2::{
     PooledConnection,
 };
 use r2d2_diesel::ConnectionManager;
-use serde::export::fmt::Display;
+use serde::export::{fmt::Display, Formatter};
 use std::{env, time::Duration};
 
 /// Type alias for our database connection pool type.
@@ -18,47 +18,87 @@ pub type Pool = r2d2::Pool<ConnectionManager<PgConnection>>;
 /// Type alias for our database connection type.
 pub type DBConn = PooledConnection<ConnectionManager<PgConnection>>;
 
-fn init_pool_builder() -> (Builder<ConnectionManager<PgConnection>>, u16) {
-    let (min_size, max_size) = pool_size();
+/// Error returned if initializing the database connection pool fails.
+#[derive(Debug)]
+pub enum InitPoolError {
+    /// There was an error establishing a connection to the database.
+    R2D2(Error),
+    /// The given environment variable was missing.
+    MissingVariable(&'static str),
+    /// The given environment variable contained an invalid value (for example, something which
+    /// was not an integer but an integer was expected).
+    InvalidValue(&'static str),
+}
+
+impl From<Error> for InitPoolError {
+    fn from(error: Error) -> Self {
+        Self::R2D2(error)
+    }
+}
+
+impl Display for InitPoolError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::R2D2(error) => write!(f, "{}", error),
+            Self::MissingVariable(name) => write!(f, "{} must be set", name),
+            Self::InvalidValue(name) => write!(f, "{} contained an invalid value", name),
+        }
+    }
+}
+
+fn init_pool_builder() -> Result<(Builder<ConnectionManager<PgConnection>>, u16), InitPoolError> {
+    let (min_size, max_size) = pool_size()?;
     let pool_builder = Pool::builder()
-        .min_idle(Some(min_size as u32))
-        .max_size(max_size as u32)
+        .min_idle(Some(u32::from(min_size)))
+        .max_size(u32::from(max_size))
         .connection_timeout(Duration::from_secs(1))
         .event_handler(Box::new(ConnectionHandler::new()))
         .error_handler(Box::new(ConnectionHandler::new()));
 
-    (pool_builder, max_size)
+    Ok((pool_builder, max_size))
 }
 
 /// Create a new database pool and connect the minimum required amount of connections.
-/// If
-pub fn init_pool_maybe() -> Result<(Pool, u16), Error> {
-    let manager = ConnectionManager::<PgConnection>::new(database_url());
-    let (pool_builder, max_size) = init_pool_builder();
+/// Reads the `DATABASE_URL`, `MIN_POOL_SIZE` and `MAX_POOL_SIZE` environment variables
+/// to determine the number of connections and database url to connect to.
+/// If `MIN_POOL_SIZE` is not set, `MAX_POOL_SIZE` will be used instead.
+///
+/// # Errors
+///
+/// If any of the required variables does not exist, can not be parsed as an integer or does
+/// not make sense (min > max). If the minimum number of connections to the database can not be
+/// established.
+pub fn init_pool_maybe() -> Result<(Pool, u16), InitPoolError> {
+    let manager = ConnectionManager::<PgConnection>::new(database_url()?);
+    let (pool_builder, max_size) = init_pool_builder()?;
     let pool = pool_builder.build(manager)?;
 
     Ok((pool, max_size))
 }
 
-fn database_url() -> String {
-    env::var("DATABASE_URL").expect("DATABASE_URL must be set")
+fn database_url() -> Result<String, InitPoolError> {
+    env::var("DATABASE_URL").map_err(|_| InitPoolError::MissingVariable("DATABASE_URL"))
 }
 
-fn pool_size() -> (u16, u16) {
-    let max_size = env::var("MAX_POOL_SIZE").expect("MAX_POOL_SIZE must be set");
+fn pool_size() -> Result<(u16, u16), InitPoolError> {
+    let max_size = env::var("MAX_POOL_SIZE").map_err(|_| InitPoolError::MissingVariable("MAX_POOL_SIZE"))?;
     let min_size = env::var("MIN_POOL_SIZE").unwrap_or_else(|_| max_size.clone());
-    let max_size = max_size.parse::<u16>().expect("MAX_POOL_SIZE must be an integer");
-    let min_size = min_size.parse::<u16>().expect("MIN_POOL_SIZE must be an integer");
+    let max_size = max_size
+        .parse::<u16>()
+        .map_err(|_| InitPoolError::InvalidValue("MAX_POOL_SIZE"))?;
+    let min_size = min_size
+        .parse::<u16>()
+        .map_err(|_| InitPoolError::InvalidValue("MIN_POOL_SIZE"))?;
 
-    (min_size, max_size)
+    Ok((min_size, max_size))
 }
 
 #[derive(Debug)]
 struct ConnectionHandler {}
 
 impl ConnectionHandler {
-    fn new() -> Self {
-        ConnectionHandler {}
+    const fn new() -> Self {
+        Self {}
     }
 }
 
@@ -124,16 +164,16 @@ mod test {
     #[test]
     fn database_url() {
         env::set_var("DATABASE_URL", "url://database");
-        assert_eq!("url://database", &super::database_url());
+        assert_eq!("url://database", &super::database_url().unwrap());
     }
 
     #[test]
     fn pool() {
         env::set_var("MAX_POOL_SIZE", "50");
-        assert_eq!((50, 50), pool_size());
+        assert_eq!((50, 50), pool_size().unwrap());
         env::set_var("MIN_POOL_SIZE", "20");
-        assert_eq!((20, 50), pool_size());
-        let (_builder, max_size) = init_pool_builder();
+        assert_eq!((20, 50), pool_size().unwrap());
+        let (_builder, max_size) = init_pool_builder().unwrap();
         assert_eq!(max_size, 50);
     }
 }

@@ -55,7 +55,7 @@ impl<W: Write> Logger<W> {
     /// assert_eq!(logger.level(), Level::Info);
     /// ```
     pub fn new(level: Level, writer: W) -> Self {
-        Logger {
+        Self {
             level,
             writer: Mutex::new(Cell::new(BufWriter::new(writer))),
         }

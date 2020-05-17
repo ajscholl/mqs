@@ -37,8 +37,8 @@ struct StringError {
 }
 
 impl StringError {
-    const fn new(error: &'static str) -> StringError {
-        StringError { error }
+    const fn new(error: &'static str) -> Self {
+        Self { error }
     }
 }
 
@@ -65,15 +65,14 @@ fn main() -> Result<(), AnyError> {
 
     rt.block_on(async {
         {
-            match get_service()
+            if let Err(ClientError::TooLargeResponse) = get_service()
                 .set_max_body_size(Some(1))
                 .get_queues(None, None, None)
                 .await
             {
-                Err(ClientError::TooLargeResponse) => {},
-                _ => {
-                    return Err(StringError::new("request should have been aborted").into());
-                },
+                // this is the expected case, don't fail
+            } else {
+                return Err(StringError::new("request should have been aborted").into());
             }
         }
         let s = get_service();
@@ -88,102 +87,22 @@ fn main() -> Result<(), AnyError> {
             }
         }
 
-        // create some test queues
-        for i in 0..queue_count {
-            let result = s
-                .create_queue(&format!("test-queue-{}", i), None, &QueueConfig {
-                    redrive_policy:        None,
-                    retention_timeout:     3600,
-                    visibility_timeout:    100,
-                    message_delay:         0,
-                    message_deduplication: false,
-                })
-                .await?;
-
-            if result.is_none() {
-                return Err(StringError::new("Failed to create queue").into());
-            }
-        }
-
-        // update test queues
-        for i in 0..queue_count {
-            let result = s
-                .update_queue(&format!("test-queue-{}", i), None, &QueueConfig {
-                    redrive_policy:        None,
-                    retention_timeout:     3600,
-                    visibility_timeout:    300,
-                    message_delay:         0,
-                    message_deduplication: false,
-                })
-                .await?;
-
-            if result.is_none() {
-                return Err(StringError::new("Failed to update queue").into());
-            }
-        }
+        create_queues(queue_count).await?;
+        update_queues(queue_count).await?;
 
         let start_publish = Utc::now();
-        let mut pending = Vec::with_capacity(queue_count);
-
-        for i in 0..queue_count {
-            let queue = format!("test-queue-{}", i);
-            let queue2 = queue.clone();
-            let handle = tokio::spawn(async move { publish_messages(i, queue2).await.unwrap() });
-            pending.push((queue, handle));
-        }
-
-        for (queue, work) in pending {
-            work.await?;
-            let info = s.describe_queue(&queue, None).await?;
-            if let Some(description) = info {
-                if description.status.messages != 10000 {
-                    return Err(StringError::new("Wrong number of messages found").into());
-                }
-            } else {
-                return Err(StringError::new("Failed to describe queue").into());
-            }
-        }
-
+        publish_test_messages(queue_count).await?;
         let start_consume = Utc::now();
         let publish_took = start_consume.clone().sub(start_publish);
         println!("Publishing took: {}", publish_took);
-        let mut pending = Vec::with_capacity(queue_count);
 
-        for i in 0..queue_count {
-            let queue = format!("test-queue-{}", i);
-            let queue2 = queue.clone();
-            let handle = tokio::spawn(async move { consume_messages(i, queue2, None).await.unwrap() });
-            pending.push((queue, handle));
-        }
-
-        for (queue, work) in pending {
-            work.await?;
-            check_queue_empty(&s, &queue).await?;
-        }
-
+        consume_test_messages(queue_count).await?;
         let end_consume = Utc::now();
         let consume_took = end_consume.sub(start_consume);
         println!("Consuming took: {}", consume_took);
 
         let start_publish_and_consume = Utc::now();
-
-        let mut pending = Vec::with_capacity(queue_count);
-
-        for i in 0..queue_count {
-            let queue = format!("test-queue-{}", i);
-            let queue2 = queue.clone();
-            let handle_publish = tokio::spawn(async move { publish_messages(i, queue2).await.unwrap() });
-            let queue2 = queue.clone();
-            let handle_consume = tokio::spawn(async move { consume_messages(i, queue2, Some(10)).await.unwrap() });
-            pending.push((queue, handle_publish, handle_consume));
-        }
-
-        for (queue, work_publish, work_consume) in pending {
-            work_publish.await?;
-            work_consume.await?;
-            check_queue_empty(&s, &queue).await?;
-        }
-
+        publish_and_consume_test_messages(queue_count).await?;
         let end_publish_and_consume = Utc::now();
         let publish_and_consume_took = end_publish_and_consume.sub(start_publish_and_consume);
         println!("Publishing and consuming took: {}", publish_and_consume_took);
@@ -192,13 +111,126 @@ fn main() -> Result<(), AnyError> {
     })
 }
 
+async fn create_queues(queue_count: usize) -> Result<(), AnyError> {
+    let s = get_service();
+
+    // create some test queues
+    for i in 0..queue_count {
+        let result = s
+            .create_queue(&format!("test-queue-{}", i), None, &QueueConfig {
+                redrive_policy:        None,
+                retention_timeout:     3600,
+                visibility_timeout:    100,
+                message_delay:         0,
+                message_deduplication: false,
+            })
+            .await?;
+
+        if result.is_none() {
+            return Err(StringError::new("Failed to create queue").into());
+        }
+    }
+
+    Ok(())
+}
+
+async fn update_queues(queue_count: usize) -> Result<(), AnyError> {
+    let s = get_service();
+
+    // update test queues
+    for i in 0..queue_count {
+        let result = s
+            .update_queue(&format!("test-queue-{}", i), None, &QueueConfig {
+                redrive_policy:        None,
+                retention_timeout:     3600,
+                visibility_timeout:    300,
+                message_delay:         0,
+                message_deduplication: false,
+            })
+            .await?;
+
+        if result.is_none() {
+            return Err(StringError::new("Failed to update queue").into());
+        }
+    }
+
+    Ok(())
+}
+
+async fn publish_test_messages(queue_count: usize) -> Result<(), AnyError> {
+    let s = get_service();
+    let mut pending = Vec::with_capacity(queue_count);
+
+    for i in 0..queue_count {
+        let queue = format!("test-queue-{}", i);
+        let queue_copy = queue.clone();
+        let handle = tokio::spawn(async move { publish_messages(i, queue_copy).await.unwrap() });
+        pending.push((queue, handle));
+    }
+
+    for (queue, work) in pending {
+        work.await?;
+        let info = s.describe_queue(&queue, None).await?;
+        if let Some(description) = info {
+            if description.status.messages != 10000 {
+                return Err(StringError::new("Wrong number of messages found").into());
+            }
+        } else {
+            return Err(StringError::new("Failed to describe queue").into());
+        }
+    }
+
+    Ok(())
+}
+
+async fn consume_test_messages(queue_count: usize) -> Result<(), AnyError> {
+    let s = get_service();
+    let mut pending = Vec::with_capacity(queue_count);
+
+    for i in 0..queue_count {
+        let queue = format!("test-queue-{}", i);
+        let queue_copy = queue.clone();
+        let handle = tokio::spawn(async move { consume_messages(i, queue_copy, None).await.unwrap() });
+        pending.push((queue, handle));
+    }
+
+    for (queue, work) in pending {
+        work.await?;
+        check_queue_empty(&s, &queue).await?;
+    }
+
+    Ok(())
+}
+
+async fn publish_and_consume_test_messages(queue_count: usize) -> Result<(), AnyError> {
+    let s = get_service();
+    let mut pending = Vec::with_capacity(queue_count);
+
+    for i in 0..queue_count {
+        let queue = format!("test-queue-{}", i);
+        let queue_copy = queue.clone();
+        let handle_publish = tokio::spawn(async move { publish_messages(i, queue_copy).await.unwrap() });
+        let queue_copy = queue.clone();
+        let handle_consume = tokio::spawn(async move { consume_messages(i, queue_copy, Some(10)).await.unwrap() });
+        pending.push((queue, handle_publish, handle_consume));
+    }
+
+    for (queue, work_publish, work_consume) in pending {
+        work_publish.await?;
+        work_consume.await?;
+        check_queue_empty(&s, &queue).await?;
+    }
+
+    Ok(())
+}
+
 async fn check_queue_empty(s: &Service, queue: &str) -> Result<(), AnyError> {
     let info = s.describe_queue(queue, None).await?;
     if let Some(description) = info {
-        if description.status.messages != 0 {
-            Err(StringError::new("Queue not yet empty").into())
-        } else {
+        if description.status.messages == 0 {
             Ok(())
+        } else {
+            Err(StringError::new("Queue not yet empty").into())
         }
     } else {
         Err(StringError::new("Failed to describe queue").into())
