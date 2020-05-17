@@ -22,10 +22,38 @@ test:
      - mkdir -p "$CARGO_HOME" "$RUSTUP_HOME"
      - rustup default "$RUST_VERSION"
      - rustup component add rustfmt
+     - rustup component add clippy
      - cargo test --locked
      - cargo fmt -- --check
+     - find . -name "*.rs" -exec touch {} \;
+     - cargo check --locked -Z unstable-options
+     - find . -name "*.rs" -exec touch {} \;
+     - cargo clippy -Z unstable-options -- -D clippy::all -D clippy::pedantic -A clippy::used-underscore-binding -D clippy::nursery
   cache:
     key: test
+    paths:
+      - target
+      - usr/local
+
+audit:
+  image: rust:1.34.0-stretch
+  stage: compile
+  before_script:
+    - mkdir -p "$(pwd)/usr/local/cargo" "$(pwd)/usr/local/rustup"
+    - mv "$(pwd)/usr/local/cargo" /usr/local/cargo
+    - mv "$(pwd)/usr/local/rustup" /usr/local/rustup
+  script:
+     - export CARGO_HOME=/usr/local/cargo
+     - export RUSTUP_HOME=/usr/local/rustup
+     - export PATH="$CARGO_HOME/bin:$RUSTUP_HOME/bin:$PATH"
+     - rustup default "$RUST_VERSION"
+     - cargo install cargo-audit
+     - cargo audit
+  after_script:
+    - mv /usr/local/cargo "$(pwd)/usr/local/cargo"
+    - mv /usr/local/rustup "$(pwd)/usr/local/rustup"
+  cache:
+    key: audit
     paths:
       - target
       - usr/local

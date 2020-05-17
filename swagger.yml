@@ -68,6 +68,12 @@ paths:
       description: |
         Overwrite the configuration of an existing queue.
         Returns the new configuration.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueueConfig'
+        description: New configuration of the queue.
       responses:
         '200':
           description: |
@@ -99,12 +105,6 @@ paths:
           description: |
             The server failed to acquire required resources to update the queue.
             Try again with exponential backoff.
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/QueueConfig'
-        description: New configuration of the queue.
     put:
       tags:
         - queues
@@ -114,6 +114,12 @@ paths:
         Create the configuration for a new queue.
         Does not overwrite existing queues.
         Returns the new configuration.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueueConfig'
+        description: Configuration of the queue to create.
       responses:
         '201':
           description: |
@@ -142,12 +148,6 @@ paths:
           description: |
             The server failed to acquire required resources to create the queue.
             Try again with exponential backoff.
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/QueueConfig'
-        description: Configuration of the queue to create.
     delete:
       tags:
         - queues
@@ -252,6 +252,7 @@ paths:
         Get up to a specified amount of messages.
         Returned messages will not be visible until timeout configured in queue expires.
         If specified, blocks until either messages may be available or a timeout expires.
+      parameters:
         - in: header
           name: X-MQS-MAX-MESSAGES
           description: Number of messages to return. Defaults to 1.
