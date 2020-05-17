@@ -38,11 +38,11 @@ impl MessageWaitQueue {
             match map.get_mut(&queue_name) {
                 None => {
                     let mut waiting = HashMap::new();
-                    waiting.insert(id.clone(), tx);
+                    waiting.insert(id, tx);
                     map.insert(queue_name.clone(), waiting);
                 },
                 Some(waiting) => {
-                    waiting.insert(id.clone(), tx);
+                    waiting.insert(id, tx);
                 },
             }
         }
@@ -92,14 +92,7 @@ impl MessageWaitQueue {
                 debug!("Not signaling on queue {}: No waiting entries", &queue.name);
             },
             Some(waiting) => {
-                let key = {
-                    let mut k = None;
-                    for key in waiting.keys() {
-                        k = Some(key.clone());
-                        break;
-                    }
-                    k
-                };
+                let key = waiting.keys().next().map_or_else(|| None, |k| Some(*k));
                 if let Some(key) = key {
                     if let Some(value) = waiting.remove(&key) {
                         match value.send(()) {
@@ -121,7 +114,7 @@ impl MessageWaitQueue {
     }
 }
 
-pub(crate) static MESSAGE_WAIT_QUEUE: Lazy<MessageWaitQueue> = Lazy::new(|| MessageWaitQueue::new());
+pub(crate) static MESSAGE_WAIT_QUEUE: Lazy<MessageWaitQueue> = Lazy::new(MessageWaitQueue::new);
 
 #[cfg(test)]
 pub(crate) mod test {
@@ -169,7 +162,7 @@ pub(crate) mod test {
     #[test]
     fn wait_signal() {
         let mut rt = make_runtime();
-        static WAIT_QUEUE: Lazy<MessageWaitQueue> = Lazy::new(|| MessageWaitQueue::new());
+        static WAIT_QUEUE: Lazy<MessageWaitQueue> = Lazy::new(MessageWaitQueue::new);
         rt.spawn(async {
             delay_for(Duration::from_secs(2)).await;
             WAIT_QUEUE.signal(&get_queue()).await;

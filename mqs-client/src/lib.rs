@@ -204,9 +204,7 @@ impl Service {
     /// ```
     /// use mqs_client::Service;
     ///
-    /// fn main() {
-    ///     let _service = Service::new("https://mqs.example.com:7843");
-    /// }
+    /// let _service = Service::new("https://mqs.example.com:7843");
     /// ```
     pub fn new(host: &str) -> Service {
         Service {
@@ -223,13 +221,11 @@ impl Service {
     /// ```
     /// use mqs_client::Service;
     ///
-    /// fn main() {
-    ///     let mut service = Service::new("https://mqs.example.com:7843");
-    ///     // allow at most 64 KiB
-    ///     service.set_max_body_size(Some(1024 * 64));
-    ///     // allow unlimited responses
-    ///     service.set_max_body_size(None);
-    /// }
+    /// let mut service = Service::new("https://mqs.example.com:7843");
+    /// // allow at most 64 KiB
+    /// service.set_max_body_size(Some(1024 * 64));
+    /// // allow unlimited responses
+    /// service.set_max_body_size(None);
     /// ```
     pub fn set_max_body_size(&mut self, max_body_size: Option<usize>) -> &mut Self {
         self.max_body_size = max_body_size;
@@ -620,7 +616,7 @@ impl Service {
     ///         trace_id:         None,
     ///         content_encoding: None,
     ///         content_type:     "application/json; encoding=utf-8",
-    ///         message:          "{}".as_bytes().to_vec(),
+    ///         message:          b"{}".to_vec(),
     ///     };
     ///
     ///     service.publish_message("my-queue", message).await
@@ -677,7 +673,7 @@ impl Service {
     pub async fn publish_messages(
         &self,
         queue_name: &str,
-        messages: &Vec<PublishableMessage<'_>>,
+        messages: &[PublishableMessage<'_>],
     ) -> Result<bool, ClientError> {
         let uri = format!("{}/messages/{}", &self.host, queue_name);
         let response = self
@@ -761,9 +757,9 @@ impl Service {
             status => Err(ClientError::ServiceError(status)),
         }?;
         if let Some(body) = body {
-            if body.as_slice().eq("green".as_bytes()) {
+            if body.as_slice().eq(b"green") {
                 Ok(true)
-            } else if body.as_slice().eq("red".as_bytes()) {
+            } else if body.as_slice().eq(b"red") {
                 Ok(false)
             } else {
                 Err(ClientError::HealthCheckError)

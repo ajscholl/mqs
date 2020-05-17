@@ -26,7 +26,7 @@ use mqs_client::Service;
 use mqs_common::logger::{configure_logger, json::Logger, NewJsonLogger};
 
 fn get_service() -> Service {
-    let host = env::var("MQS_SERVER").unwrap_or("localhost".to_string());
+    let host = env::var("MQS_SERVER").unwrap_or_else(|_| "localhost".to_string());
     Service::new(&format!("http://{}:7843", &host))
 }
 

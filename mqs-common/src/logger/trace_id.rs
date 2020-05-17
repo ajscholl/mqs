@@ -17,16 +17,14 @@ task_local!(
 /// };
 /// use uuid::Uuid;
 ///
-/// fn main() {
-///     make_runtime().block_on(async {
-///         assert_eq!(get_trace_id(), None);
-///         let trace_id = Uuid::new_v4();
-///         with_trace_id(trace_id, async {
-///             assert_eq!(get_trace_id(), Some(trace_id));
-///         })
-///         .await;
-///     });
-/// }
+/// make_runtime().block_on(async {
+///     assert_eq!(get_trace_id(), None);
+///     let trace_id = Uuid::new_v4();
+///     with_trace_id(trace_id, async {
+///         assert_eq!(get_trace_id(), Some(trace_id));
+///     })
+///     .await;
+/// });
 /// ```
 pub fn get_trace_id() -> Option<Uuid> {
     match TRACE_ID.try_with(|trace_id| *trace_id) {
@@ -45,22 +43,20 @@ pub fn get_trace_id() -> Option<Uuid> {
 /// };
 /// use uuid::Uuid;
 ///
-/// fn main() {
-///     make_runtime().block_on(async {
-///         let outer = Uuid::new_v4();
-///         with_trace_id(outer, async {
-///             assert_eq!(get_trace_id(), Some(outer));
-///             let inner = Uuid::new_v4();
-///             with_trace_id(inner, async {
-///                 assert_eq!(get_trace_id(), Some(inner));
-///             })
-///             .await;
-///             assert_eq!(get_trace_id(), Some(outer));
+/// make_runtime().block_on(async {
+///     let outer = Uuid::new_v4();
+///     with_trace_id(outer, async {
+///         assert_eq!(get_trace_id(), Some(outer));
+///         let inner = Uuid::new_v4();
+///         with_trace_id(inner, async {
+///             assert_eq!(get_trace_id(), Some(inner));
 ///         })
 ///         .await;
-///         assert_eq!(get_trace_id(), None);
-///     });
-/// }
+///         assert_eq!(get_trace_id(), Some(outer));
+///     })
+///     .await;
+///     assert_eq!(get_trace_id(), None);
+/// });
 /// ```
 pub async fn with_trace_id<F: Future>(id: Uuid, f: F) -> F::Output {
     TRACE_ID.scope(id, f).await
@@ -74,20 +70,18 @@ pub async fn with_trace_id<F: Future>(id: Uuid, f: F) -> F::Output {
 /// use hyper::Body;
 /// use mqs_common::{logger::create_trace_id, TRACE_ID_HEADER};
 ///
-/// fn main() {
-///     let mut req = Request::new(Body::default());
-///     // random trace id as we did not supply any headers
-///     let trace_id = create_trace_id(&req);
-///     req.headers_mut().insert(
-///         TRACE_ID_HEADER.name(),
-///         HeaderValue::from_str(&trace_id.to_string()).unwrap(),
-///     );
-///     // we get back whatever we set as X-TRACE-ID header
-///     assert_eq!(create_trace_id(&req), trace_id);
-/// }
+/// let mut req = Request::new(Body::default());
+/// // random trace id as we did not supply any headers
+/// let trace_id = create_trace_id(&req);
+/// req.headers_mut().insert(
+///     TRACE_ID_HEADER.name(),
+///     HeaderValue::from_str(&trace_id.to_string()).unwrap(),
+/// );
+/// // we get back whatever we set as X-TRACE-ID header
+/// assert_eq!(create_trace_id(&req), trace_id);
 /// ```
 pub fn create_trace_id(req: &Request<Body>) -> Uuid {
-    TRACE_ID_HEADER.get(req.headers()).unwrap_or_else(|| Uuid::new_v4())
+    TRACE_ID_HEADER.get(req.headers()).unwrap_or_else(Uuid::new_v4)
 }
 
 #[cfg(test)]

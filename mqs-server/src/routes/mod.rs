@@ -18,14 +18,14 @@ pub(crate) struct ErrorResponse<'a> {
 
 #[derive(Debug)]
 pub(crate) enum MqsResponse {
-    StatusResponse(Status),
-    JsonResponse(Status, String),
-    MessageResponse(Status, Vec<Message>),
+    Status(Status),
+    Json(Status, String),
+    Message(Status, Vec<Message>),
 }
 
 impl MqsResponse {
     pub(crate) fn status(status: Status) -> Self {
-        MqsResponse::StatusResponse(status)
+        MqsResponse::Status(status)
     }
 
     pub(crate) fn error_static(error: &'static str) -> Self {
@@ -45,31 +45,31 @@ impl MqsResponse {
             Err(err) => {
                 error!("Failed to serialize json response: {}", err);
 
-                MqsResponse::StatusResponse(Status::InternalServerError)
+                MqsResponse::Status(Status::InternalServerError)
             },
-            Ok(json) => MqsResponse::JsonResponse(status, json),
+            Ok(json) => MqsResponse::Json(status, json),
         }
     }
 
     pub(crate) fn messages(messages: Vec<Message>) -> Self {
-        MqsResponse::MessageResponse(Status::Ok, messages)
+        MqsResponse::Message(Status::Ok, messages)
     }
 
     pub(crate) fn into_response(self) -> hyper::Response<Body> {
         match self {
-            MqsResponse::StatusResponse(status) => {
+            MqsResponse::Status(status) => {
                 let mut res = hyper::Response::new(Body::default());
                 *res.status_mut() = status.into();
                 res
             },
-            MqsResponse::JsonResponse(status, body) => {
+            MqsResponse::Json(status, body) => {
                 let mut res = hyper::Response::new(Body::from(body));
                 *res.status_mut() = status.into();
                 res.headers_mut()
                     .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
                 res
             },
-            MqsResponse::MessageResponse(status, mut messages) => {
+            MqsResponse::Message(status, mut messages) => {
                 if messages.len() == 1 {
                     let message = messages.pop().unwrap();
 

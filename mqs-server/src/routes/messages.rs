@@ -17,13 +17,13 @@ use crate::{
 
 fn boundary_from_headers(headers: &HeaderMap<HeaderValue>) -> Option<String> {
     let content_type_header = headers.get(CONTENT_TYPE)?;
-    let content_type = content_type_header.to_str().map_or_else(|_| None, |s| Some(s))?;
+    let content_type = content_type_header.to_str().map_or_else(|_| None, Some)?;
     multipart::is_multipart(content_type)
 }
 
 pub(crate) async fn publish_messages<R: QueueRepository + MessageRepository>(
     repo: R,
-    queue_name: &String,
+    queue_name: &str,
     message_content: &[u8],
     headers: HeaderMap<HeaderValue>,
 ) -> MqsResponse {

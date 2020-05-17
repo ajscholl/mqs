@@ -108,9 +108,9 @@ impl TryFrom<&Request<Body>> for QueuesRange {
         let mut limit = Ok(None);
         for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
             if key.as_ref() == "offset" {
-                offset = value.parse().map_or_else(|e| Err(e), |v| Ok(Some(v)));
+                offset = value.parse().map_or_else(Err, |v| Ok(Some(v)));
             } else if key.as_ref() == "limit" {
-                limit = value.parse().map_or_else(|e| Err(e), |v| Ok(Some(v)));
+                limit = value.parse().map_or_else(Err, |v| Ok(Some(v)));
             }
         }
 

@@ -19,7 +19,7 @@ struct QueuesSubRouter;
 
 impl<R: QueueRepository, S: Source<R>> WildcardRouter<(R, S)> for QueuesSubRouter {
     fn with_segment(&self, segment: &str) -> Router<(R, S)> {
-        Router::new()
+        Router::default()
             .with_handler(Method::GET, DescribeQueueHandler {
                 queue_name: segment.to_string(),
             })
@@ -39,7 +39,7 @@ struct MessagesSubRouter;
 
 impl<R: QueueRepository + MessageRepository, S: Source<R>> WildcardRouter<(R, S)> for MessagesSubRouter {
     fn with_segment(&self, segment: &str) -> Router<(R, S)> {
-        Router::new()
+        Router::default()
             .with_handler(Method::GET, ReceiveMessagesHandler {
                 queue_name: segment.to_string(),
             })
@@ -54,13 +54,13 @@ impl<R: QueueRepository + MessageRepository, S: Source<R>> WildcardRouter<(R, S)
 
 /// Create a new instance of the router.
 pub fn make_router<R: QueueRepository + MessageRepository + HealthCheckRepository, S: Source<R>>() -> Router<(R, S)> {
-    Router::new()
+    Router::default()
         .with_route_simple("health", Method::GET, HealthHandler)
         .with_route(
             "queues",
             Router::new_simple(Method::GET, ListQueuesHandler).with_wildcard(QueuesSubRouter),
         )
-        .with_route("messages", Router::new().with_wildcard(MessagesSubRouter))
+        .with_route("messages", Router::default().with_wildcard(MessagesSubRouter))
 }
 
 #[cfg(test)]
@@ -110,14 +110,14 @@ mod test {
             let mut response = run_handler(handler.clone(), &repo);
             assert_eq!(StatusCode::from(Status::Ok), response.status());
             let body = read_body(response.body_mut());
-            assert_eq!(body, "green".as_bytes().to_vec());
+            assert_eq!(body, b"green".to_vec());
         }
         {
             repo.lock().unwrap().set_health(false);
             let mut response = run_handler(handler, &repo);
             assert_eq!(StatusCode::from(Status::Ok), response.status());
             let body = read_body(response.body_mut());
-            assert_eq!(body, "red".as_bytes().to_vec());
+            assert_eq!(body, b"red".to_vec());
         }
     }
 
@@ -246,11 +246,7 @@ mod test {
         assert!(publish_handler.is_some());
         let publish_handler = publish_handler.unwrap();
         {
-            let mut response = run_handler_with(
-                publish_handler,
-                &repo,
-                "{\"content\": \"my message\"}".as_bytes().to_vec(),
-            );
+            let mut response = run_handler_with(publish_handler, &repo, b"{\"content\": \"my message\"}".to_vec());
             assert_eq!(StatusCode::from(Status::Created), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(body.len(), 0);
@@ -262,7 +258,7 @@ mod test {
             let mut response = run_handler(receive_handler, &repo);
             assert_eq!(StatusCode::from(Status::Ok), response.status());
             let body = read_body(response.body_mut());
-            assert_eq!(body, "{\"content\": \"my message\"}".as_bytes().to_vec());
+            assert_eq!(body, b"{\"content\": \"my message\"}".to_vec());
             let response_message_id = response.headers().get(HeaderName::from_static("x-mqs-message-id"));
             assert!(response_message_id.is_some());
             response_message_id.unwrap().to_str().unwrap().to_string()

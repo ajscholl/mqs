@@ -37,6 +37,17 @@ pub struct Router<A> {
     sub_router:      HashMap<&'static str, Router<A>>,
 }
 
+impl<A> Default for Router<A> {
+    /// Create a new empty router. The router does not route any requests initially.
+    fn default() -> Self {
+        Router {
+            handler:         HashMap::new(),
+            wildcard_router: None,
+            sub_router:      HashMap::new(),
+        }
+    }
+}
+
 impl<A> Router<A> {
     /// Route a single request with the given method and segments of the URL. The segments are
     /// expected to be the path of the URL split by the '/' characters.
@@ -65,18 +76,9 @@ impl<A> Router<A> {
         }
     }
 
-    /// Create a new empty router. The router does not route any requests initially.
-    pub fn new() -> Self {
-        Router {
-            handler:         HashMap::new(),
-            wildcard_router: None,
-            sub_router:      HashMap::new(),
-        }
-    }
-
     /// Create a new router with a single handler registered on the root path for the given method.
     pub fn new_simple<H: 'static + Handler<A>>(method: Method, handler: H) -> Self {
-        Self::new().with_handler(method, handler)
+        Self::default().with_handler(method, handler)
     }
 
     /// Create a new router from the current router which routes a request to the root with the given
@@ -190,7 +192,7 @@ pub(crate) mod test {
 
     #[test]
     fn route_simple_sub() {
-        let router = Router::new().with_route("sub", Router::new_simple(Method::GET, SimpleHandler));
+        let router = Router::default().with_route("sub", Router::new_simple(Method::GET, SimpleHandler));
         assert!(router.route(&Method::GET, vec![""].into_iter()).is_none());
         assert!(router.route(&Method::GET, vec!["another"].into_iter()).is_none());
         assert!(router.route(&Method::GET, vec!["another", "sub"].into_iter()).is_none());
@@ -206,9 +208,9 @@ pub(crate) mod test {
 
     #[test]
     fn route_nested() {
-        let router = Router::new().with_route(
+        let router = Router::default().with_route(
             "sub",
-            Router::new()
+            Router::default()
                 .with_route("route", Router::new_simple(Method::POST, SimpleHandler))
                 .with_route(
                     "static",
@@ -265,10 +267,10 @@ pub(crate) mod test {
 
     #[test]
     fn route_wildcard() {
-        let router = Router::new()
+        let router = Router::default()
             .with_route(
                 "collect",
-                Router::new().with_wildcard(CollectingHandler { messages: Vec::new() }),
+                Router::default().with_wildcard(CollectingHandler { messages: Vec::new() }),
             )
             .with_route("simple", Router::new_simple(Method::GET, SimpleHandler));
         assert!(router.route(&Method::POST, vec!["collect"].into_iter()).is_none());

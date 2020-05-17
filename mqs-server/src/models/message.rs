@@ -149,7 +149,7 @@ impl MessageRepository for PgRepository {
                 self.move_message_to_queue(move_to_dead_letter_queue, dead_letter_queue)?;
             }
         }
-        return Ok(result);
+        Ok(result)
     }
 
     fn move_message_to_queue(&self, ids: Vec<Uuid>, new_queue: &str) -> QueryResult<usize> {

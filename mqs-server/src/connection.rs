@@ -109,10 +109,8 @@ impl<E: Display> HandleError<E> for ConnectionHandler {
 ///     }
 /// }
 ///
-/// fn main() {
-///     let src = ConnSource {};
-///     assert_eq!(src.get(), Some(DbConn {}));
-/// }
+/// let src = ConnSource {};
+/// assert_eq!(src.get(), Some(DbConn {}));
 /// ```
 pub trait Source<R>: Send {
     /// Get a resource from a `Source`.

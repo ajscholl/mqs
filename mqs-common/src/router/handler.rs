@@ -37,33 +37,28 @@ use crate::{read_body, router::Router, Status};
 ///     }
 /// }
 ///
-/// fn main() {
-///     make_runtime().block_on(async {
-///         let router = Router::new_simple(Method::GET, ExampleHandler {});
-///         let mut response = handle(None, IntSource { int: 5 }, &router, 100, Request::new(Body::default()))
-///             .await
-///             .unwrap();
-///         assert_eq!(response.status(), 503);
-///         assert_eq!(
-///             read_body(response.body_mut(), None).await.unwrap().unwrap(),
-///             "{\"error\":\"Service unavailable, try again later\"}".as_bytes()
-///         );
-///         let mut response = handle(
-///             Some(42),
-///             IntSource { int: 5 },
-///             &router,
-///             100,
-///             Request::new(Body::default()),
-///         )
+/// make_runtime().block_on(async {
+///     let router = Router::new_simple(Method::GET, ExampleHandler {});
+///     let mut response = handle(None, IntSource { int: 5 }, &router, 100, Request::new(Body::default()))
 ///         .await
 ///         .unwrap();
-///         assert_eq!(response.status(), 200);
-///         assert_eq!(
-///             read_body(response.body_mut(), None).await.unwrap().unwrap(),
-///             "42 -> 5".as_bytes()
-///         );
-///     });
-/// }
+///     assert_eq!(response.status(), 503);
+///     assert_eq!(
+///         read_body(response.body_mut(), None).await.unwrap().unwrap(),
+///         "{\"error\":\"Service unavailable, try again later\"}".as_bytes()
+///     );
+///     let mut response = handle(
+///         Some(42),
+///         IntSource { int: 5 },
+///         &router,
+///         100,
+///         Request::new(Body::default()),
+///     )
+///     .await
+///     .unwrap();
+///     assert_eq!(response.status(), 200);
+///     assert_eq!(read_body(response.body_mut(), None).await.unwrap().unwrap(), b"42 -> 5");
+/// });
 /// ```
 pub async fn handle<T, S>(
     conn: Option<T>,
@@ -74,7 +69,7 @@ pub async fn handle<T, S>(
 ) -> Result<Response<Body>, Infallible> {
     let version = req.version();
     let mut response = if let Some(conn) = conn {
-        let segments = req.uri().path().split("/").into_iter();
+        let segments = req.uri().path().split('/');
         {
             if let Some(handler) = router.route(req.method(), segments) {
                 let body = if handler.needs_body() {
@@ -187,10 +182,7 @@ mod test {
                 .await
                 .unwrap();
             assert_eq!(response.status(), 200);
-            assert_eq!(
-                read_body(response.body_mut(), None).await.unwrap().unwrap(),
-                "42 -> ".as_bytes()
-            );
+            assert_eq!(read_body(response.body_mut(), None).await.unwrap().unwrap(), b"42 -> ");
             let mut response = handle(Some(42), (), &router, 3, Request::new(Body::from("hello".to_string())))
                 .await
                 .unwrap();
@@ -202,7 +194,7 @@ mod test {
             let mut response = handle(
                 Some(42),
                 (),
-                &Router::new(),
+                &Router::default(),
                 3,
                 Request::new(Body::from("hello".to_string())),
             )

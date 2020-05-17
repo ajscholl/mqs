@@ -51,10 +51,8 @@ impl<W: Write> Logger<W> {
     /// use mqs_common::logger::json::Logger;
     /// use std::io::stdout;
     ///
-    /// fn main() {
-    ///     let logger = Logger::new(Level::Info, stdout());
-    ///     assert_eq!(logger.level(), Level::Info);
-    /// }
+    /// let logger = Logger::new(Level::Info, stdout());
+    /// assert_eq!(logger.level(), Level::Info);
     /// ```
     pub fn new(level: Level, writer: W) -> Self {
         Logger {
@@ -71,10 +69,8 @@ impl<W: Write> Logger<W> {
     /// use mqs_common::logger::json::Logger;
     /// use std::io::stdout;
     ///
-    /// fn main() {
-    ///     let logger = Logger::new(Level::Info, stdout());
-    ///     assert_eq!(logger.level(), Level::Info);
-    /// }
+    /// let logger = Logger::new(Level::Info, stdout());
+    /// assert_eq!(logger.level(), Level::Info);
     /// ```
     pub fn level(&self) -> Level {
         self.level
@@ -88,12 +84,10 @@ impl<W: Write> Logger<W> {
     /// use mqs_common::logger::json::Logger;
     /// use std::io::stdout;
     ///
-    /// fn main() {
-    ///     let mut logger = Logger::new(Level::Info, stdout());
-    ///     assert_eq!(logger.level(), Level::Info);
-    ///     logger.set_level(Level::Warn);
-    ///     assert_eq!(logger.level(), Level::Warn);
-    /// }
+    /// let mut logger = Logger::new(Level::Info, stdout());
+    /// assert_eq!(logger.level(), Level::Info);
+    /// logger.set_level(Level::Warn);
+    /// assert_eq!(logger.level(), Level::Warn);
     /// ```
     pub fn set_level(&mut self, level: Level) {
         self.level = level;
@@ -109,7 +103,7 @@ impl<W: Write + Send> Log for Logger<W> {
         if self.enabled(record.metadata()) {
             let msg = LogMessage::build(record);
             if let Ok(mut line) = serde_json::to_vec(&msg) {
-                line.push('\n' as u8);
+                line.push(b'\n');
                 if let Ok(mut writer) = self.writer.lock() {
                     if let Ok(r) = writer.get_mut().write_all(line.as_slice()) {
                         r

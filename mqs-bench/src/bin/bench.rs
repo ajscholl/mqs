@@ -51,7 +51,7 @@ impl Display for StringError {
 impl Error for StringError {}
 
 fn get_service() -> Service {
-    let host = env::var("MQS_SERVER").unwrap_or("localhost".to_string());
+    let host = env::var("MQS_SERVER").unwrap_or_else(|_| "localhost".to_string());
     Service::new(&format!("http://{}:7843", &host))
 }
 
@@ -72,7 +72,7 @@ fn main() -> Result<(), AnyError> {
             {
                 Err(ClientError::TooLargeResponse) => {},
                 _ => {
-                    Err(StringError::new("request should have been aborted"))?;
+                    return Err(StringError::new("request should have been aborted").into());
                 },
             }
         }
@@ -84,7 +84,7 @@ fn main() -> Result<(), AnyError> {
             let result = s.delete_queue(&queue.name, None).await?;
 
             if result.is_none() {
-                Err(StringError::new("Failed to delete queue"))?;
+                return Err(StringError::new("Failed to delete queue").into());
             }
         }
 
@@ -101,7 +101,7 @@ fn main() -> Result<(), AnyError> {
                 .await?;
 
             if result.is_none() {
-                Err(StringError::new("Failed to create queue"))?;
+                return Err(StringError::new("Failed to create queue").into());
             }
         }
 
@@ -118,7 +118,7 @@ fn main() -> Result<(), AnyError> {
                 .await?;
 
             if result.is_none() {
-                Err(StringError::new("Failed to update queue"))?;
+                return Err(StringError::new("Failed to update queue").into());
             }
         }
 
@@ -137,10 +137,10 @@ fn main() -> Result<(), AnyError> {
             let info = s.describe_queue(&queue, None).await?;
             if let Some(description) = info {
                 if description.status.messages != 10000 {
-                    Err(StringError::new("Wrong number of messages found"))?;
+                    return Err(StringError::new("Wrong number of messages found").into());
                 }
             } else {
-                Err(StringError::new("Failed to describe queue"))?;
+                return Err(StringError::new("Failed to describe queue").into());
             }
         }
 
@@ -196,17 +196,17 @@ async fn check_queue_empty(s: &Service, queue: &str) -> Result<(), AnyError> {
     let info = s.describe_queue(queue, None).await?;
     if let Some(description) = info {
         if description.status.messages != 0 {
-            Err(StringError::new("Queue not yet empty"))?
+            Err(StringError::new("Queue not yet empty").into())
         } else {
             Ok(())
         }
     } else {
-        Err(StringError::new("Failed to describe queue"))?
+        Err(StringError::new("Failed to describe queue").into())
     }
 }
 
-const DEFAULT_MESSAGE: [&'static [u8]; 3] = [
-    "{\"data\":\"a test\"}".as_bytes(),
+const DEFAULT_MESSAGE: [&[u8]; 3] = [
+    b"{\"data\":\"a test\"}",
     &[6, 3, 6, 8, 0, 0, 0, 1, 5, 22, 254, 0, 32, 100, 128, 0],
     &[1, 2, 5, 3, 7, 4, 98, 66, 127, 0, 255, 192],
 ];
@@ -215,8 +215,8 @@ const DEFAULT_TRACE_ID: [Option<Uuid>; 3] = [
     Some(Uuid::NAMESPACE_URL),
     None,
 ];
-const DEFAULT_MESSAGE_CONTENT_TYPE: [&'static str; 3] = ["application/json", "text/html", "image/png"];
-const DEFAULT_MESSAGE_CONTENT_ENCODING: [Option<&'static str>; 3] = [Some("identity"), Some("gzip"), None];
+const DEFAULT_MESSAGE_CONTENT_TYPE: [&str; 3] = ["application/json", "text/html", "image/png"];
+const DEFAULT_MESSAGE_CONTENT_ENCODING: [Option<&str>; 3] = [Some("identity"), Some("gzip"), None];
 
 async fn publish_messages(index: usize, queue: String) -> Result<(), AnyError> {
     let s = get_service();
@@ -233,7 +233,7 @@ async fn publish_messages(index: usize, queue: String) -> Result<(), AnyError> {
     for _ in 0..10000 / message_bundle.len() {
         let result = s.publish_messages(&queue, &message_bundle).await?;
         if !result {
-            Err(StringError::new("Expected successful publish"))?;
+            return Err(StringError::new("Expected successful publish").into());
         }
     }
 
@@ -252,35 +252,35 @@ async fn consume_messages(index: usize, queue: String, timeout: Option<u16>) -> 
                     break;
                 }
                 for message in messages {
-                    if &message.content_type != DEFAULT_MESSAGE_CONTENT_TYPE[index % DEFAULT_MESSAGE_CONTENT_TYPE.len()]
+                    if message.content_type != DEFAULT_MESSAGE_CONTENT_TYPE[index % DEFAULT_MESSAGE_CONTENT_TYPE.len()]
                     {
-                        Err(StringError::new("Message content type does not match"))?;
+                        return Err(StringError::new("Message content type does not match").into());
                     }
                     match DEFAULT_MESSAGE_CONTENT_ENCODING[index % DEFAULT_MESSAGE_CONTENT_ENCODING.len()] {
                         None => {
                             if message.content_encoding.is_some() {
-                                Err(StringError::new("Unexpected message content encoding"))?;
+                                return Err(StringError::new("Unexpected message content encoding").into());
                             }
                         },
                         Some(encoding) => {
                             if message.content_encoding.is_none() {
-                                Err(StringError::new("Message content encoding missing"))?;
+                                return Err(StringError::new("Message content encoding missing").into());
                             }
                             if message.content_encoding.unwrap().as_str() != encoding {
-                                Err(StringError::new("Message content encoding does not match"))?;
+                                return Err(StringError::new("Message content encoding does not match").into());
                             }
                         },
                     }
                     if message.trace_id != DEFAULT_TRACE_ID[index % DEFAULT_TRACE_ID.len()] {
-                        Err(StringError::new("Message trace id does not match"))?;
+                        return Err(StringError::new("Message trace id does not match").into());
                     }
                     if message.content.as_slice() != DEFAULT_MESSAGE[index % DEFAULT_MESSAGE.len()] {
-                        Err(StringError::new("Message content does not match"))?;
+                        return Err(StringError::new("Message content does not match").into());
                     }
                     let deleted = s.delete_message(None, &message.message_id).await?;
 
                     if !deleted {
-                        Err(StringError::new("Failed to delete message"))?;
+                        return Err(StringError::new("Failed to delete message").into());
                     }
                 }
             }

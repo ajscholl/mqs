@@ -16,19 +16,19 @@ pub fn encode<I: Iterator<Item = (HeaderMap, Vec<u8>)>>(messages: I) -> (String,
 
     for (headers, message) in messages {
         body.extend_from_slice(full_boundary.as_slice());
-        body.extend_from_slice("\r\n".as_bytes());
+        body.extend_from_slice(b"\r\n");
         for (header_name, header_value) in &headers {
             body.extend_from_slice(header_name.as_str().as_bytes());
-            body.extend_from_slice(": ".as_bytes());
+            body.extend_from_slice(b": ");
             body.extend_from_slice(header_value.as_bytes());
-            body.extend_from_slice("\r\n".as_bytes());
+            body.extend_from_slice(b"\r\n");
         }
-        body.extend_from_slice("\r\n".as_bytes());
+        body.extend_from_slice(b"\r\n");
         body.extend_from_slice(message.as_slice());
-        body.extend_from_slice("\r\n".as_bytes());
+        body.extend_from_slice(b"\r\n");
     }
     body.extend_from_slice(full_boundary.as_slice());
-    body.extend_from_slice("--".as_bytes());
+    body.extend_from_slice(b"--");
 
     (boundary, body)
 }
@@ -38,19 +38,17 @@ pub fn encode<I: Iterator<Item = (HeaderMap, Vec<u8>)>>(messages: I) -> (String,
 /// ```
 /// use mqs_common::multipart::is_multipart;
 ///
-/// fn main() {
-///     assert_eq!(is_multipart("multipart/mixed; boundary=abc"), Some("--abc".to_string()));
-///     assert_eq!(
-///         is_multipart("multipart/mixed; boundary=\"abc def\""),
-///         Some("--abc def".to_string())
-///     );
-///     assert_eq!(is_multipart("multipart/other; boundary=\"abc def\""), None);
-///     assert_eq!(is_multipart("test/plain"), None);
-/// }
+/// assert_eq!(is_multipart("multipart/mixed; boundary=abc"), Some("--abc".to_string()));
+/// assert_eq!(
+///     is_multipart("multipart/mixed; boundary=\"abc def\""),
+///     Some("--abc def".to_string())
+/// );
+/// assert_eq!(is_multipart("multipart/other; boundary=\"abc def\""), None);
+/// assert_eq!(is_multipart("test/plain"), None);
 /// ```
 pub fn is_multipart(content_type: &str) -> Option<String> {
     let (top, rest) = {
-        let mut i = content_type.splitn(2, "/").into_iter();
+        let mut i = content_type.splitn(2, '/');
         let top = i.next();
         let rest = i.next();
         debug_assert!(i.next().is_none());
@@ -63,16 +61,16 @@ pub fn is_multipart(content_type: &str) -> Option<String> {
         return None;
     }
 
-    for param in rest.split(";").into_iter() {
+    for param in rest.split(';').into_iter() {
         let (key, value) = {
-            let mut i = param.splitn(2, "=").into_iter();
+            let mut i = param.splitn(2, '=');
             let key = i.next();
             let value = i.next();
             debug_assert!(i.next().is_none());
             match (key, value) {
                 (Some(key), Some(value)) => (key.trim(), {
                     let trimmed = value.trim();
-                    if trimmed.starts_with("\"") && trimmed.ends_with("\"") {
+                    if trimmed.starts_with('"') && trimmed.ends_with('"') {
                         &trimmed[1..trimmed.len() - 1]
                     } else {
                         trimmed
@@ -137,12 +135,12 @@ pub fn parse<'a, 'b>(boundary: &'b [u8], body: &'a [u8]) -> Result<Vec<(HeaderMa
             }
         }
 
-        if document.starts_with("--".as_bytes()) {
+        if document.starts_with(b"--") {
             // last boundary, stop processing
             break;
         }
 
-        if !document.starts_with("\r\n".as_bytes()) {
+        if !document.starts_with(b"\r\n") {
             // invalid chunk, signal bad request
             return Err(ParseError::InvalidChunk);
         }
@@ -150,17 +148,17 @@ pub fn parse<'a, 'b>(boundary: &'b [u8], body: &'a [u8]) -> Result<Vec<(HeaderMa
         // remove initial CRLF
         let doc: &[u8] = &document[2..];
 
-        if doc.starts_with("\r\n".as_bytes()) {
+        if doc.starts_with(b"\r\n") {
             // empty list of headers,
             result.push((HeaderMap::new(), &doc[2..]));
             continue;
         }
 
-        if let Some((header_text, body)) = split_by(doc, "\r\n\r\n".as_bytes()) {
+        if let Some((header_text, body)) = split_by(doc, b"\r\n\r\n".as_ref()) {
             let headers = {
                 let mut headers = HeaderMap::new();
                 for header in split(header_text, &HeaderValueSep {}) {
-                    if let Some((name, body)) = split_by(header, ":".as_bytes()) {
+                    if let Some((name, body)) = split_by(header, &b':') {
                         headers.insert(HeaderName::from_bytes(name)?, to_header_value(body)?);
                     }
                 }
@@ -214,6 +212,20 @@ trait Matcher {
     fn does_match(&self, data: &[u8]) -> Option<usize>;
 }
 
+impl Matcher for u8 {
+    fn min_len(&self) -> usize {
+        1
+    }
+
+    fn does_match(&self, data: &[u8]) -> Option<usize> {
+        if data.first() == Some(self) {
+            Some(1)
+        } else {
+            None
+        }
+    }
+}
+
 impl Matcher for [u8] {
     fn min_len(&self) -> usize {
         self.len()
@@ -236,7 +248,7 @@ impl Matcher for HeaderValueSep {
     }
 
     fn does_match(&self, data: &[u8]) -> Option<usize> {
-        if data.starts_with("\r\n".as_bytes()) && (data.len() <= 2 || (data[2] != 0x20 && data[2] != 0x09)) {
+        if data.starts_with(b"\r\n") && (data.len() <= 2 || (data[2] != 0x20 && data[2] != 0x09)) {
             Some(2)
         } else {
             None
@@ -254,7 +266,7 @@ fn to_header_value(value: &[u8]) -> Result<HeaderValue, InvalidHeaderValue> {
                 i += 1;
             },
             skip => {
-                buffer.push(' ' as u8);
+                buffer.push(b' ');
                 i += skip;
             },
         }
@@ -274,7 +286,7 @@ impl<'a> Matcher for Boundary<'a> {
     }
 
     fn does_match(&self, data: &[u8]) -> Option<usize> {
-        if !data.starts_with("\r\n".as_bytes()) || !(&data[2..]).starts_with(self.boundary) {
+        if !data.starts_with(b"\r\n") || !(&data[2..]).starts_with(self.boundary) {
             return None;
         }
 
@@ -308,10 +320,10 @@ fn trim_bytes(data: &[u8]) -> &[u8] {
     let mut start = 0;
     let mut end = data.len() - 1;
 
-    while start < end && data[start] == ' ' as u8 {
+    while start < end && data[start] == b' ' {
         start += 1;
     }
-    while end > start && data[end] == ' ' as u8 {
+    while end > start && data[end] == b' ' {
         end -= 1;
     }
 
@@ -362,7 +374,7 @@ mod test {
                     m.insert(CONTENT_TYPE, HeaderValue::from_static("data/type"));
                     m
                 },
-                "This is my first message".as_bytes().to_vec(),
+                b"This is my first message".to_vec(),
             ),
             (
                 {
@@ -370,7 +382,7 @@ mod test {
                     m.insert(CONTENT_TYPE, HeaderValue::from_static("data/another-type"));
                     m
                 },
-                "\r\nAnother message\r\nWith more than one line\r\n".as_bytes().to_vec(),
+                b"\r\nAnother message\r\nWith more than one line\r\n".to_vec(),
             ),
             (
                 {
@@ -378,7 +390,7 @@ mod test {
                     m.insert(CONTENT_TYPE, HeaderValue::from_static("foo/bar"));
                     m
                 },
-                "Last message, don't forget it".as_bytes().to_vec(),
+                b"Last message, don't forget it".to_vec(),
             ),
         ]
     }
@@ -386,37 +398,37 @@ mod test {
     #[test]
     fn split_by() {
         {
-            let (a, b) = super::split_by("a:b".as_bytes(), ":".as_bytes()).unwrap();
-            assert_eq!(a, "a".as_bytes());
-            assert_eq!(b, "b".as_bytes());
+            let (a, b) = super::split_by(b"a:b", &b':').unwrap();
+            assert_eq!(a, b"a");
+            assert_eq!(b, b"b");
         }
         {
-            assert_eq!(super::split_by("".as_bytes(), ":".as_bytes()), None);
+            assert_eq!(super::split_by(b"", &b':'), None);
         }
         {
-            let (a, b) = super::split_by("asd:b".as_bytes(), ":".as_bytes()).unwrap();
-            assert_eq!(a, "asd".as_bytes());
-            assert_eq!(b, "b".as_bytes());
+            let (a, b) = super::split_by(b"asd:b", &b':').unwrap();
+            assert_eq!(a, b"asd");
+            assert_eq!(b, b"b");
         }
         {
-            let (a, b) = super::split_by("asd:b:c".as_bytes(), ":".as_bytes()).unwrap();
-            assert_eq!(a, "asd".as_bytes());
-            assert_eq!(b, "b:c".as_bytes());
+            let (a, b) = super::split_by(b"asd:b:c", &b':').unwrap();
+            assert_eq!(a, b"asd");
+            assert_eq!(b, b"b:c");
         }
         {
-            let (a, b) = super::split_by("a:b::c".as_bytes(), "::".as_bytes()).unwrap();
-            assert_eq!(a, "a:b".as_bytes());
-            assert_eq!(b, "c".as_bytes());
+            let (a, b) = super::split_by(b"a:b::c", b"::".as_ref()).unwrap();
+            assert_eq!(a, b"a:b");
+            assert_eq!(b, b"c");
         }
     }
 
     #[test]
     fn trim_bytes() {
-        assert_eq!(super::trim_bytes("asd".as_bytes()), "asd".as_bytes());
-        assert_eq!(super::trim_bytes("  asd".as_bytes()), "asd".as_bytes());
-        assert_eq!(super::trim_bytes("asd ".as_bytes()), "asd".as_bytes());
-        assert_eq!(super::trim_bytes("  asd ".as_bytes()), "asd".as_bytes());
-        assert_eq!(super::trim_bytes("  asd   asd  ".as_bytes()), "asd   asd".as_bytes());
+        assert_eq!(super::trim_bytes(b"asd"), b"asd");
+        assert_eq!(super::trim_bytes(b"  asd"), b"asd");
+        assert_eq!(super::trim_bytes(b"asd "), b"asd");
+        assert_eq!(super::trim_bytes(b"  asd "), b"asd");
+        assert_eq!(super::trim_bytes(b"  asd   asd  "), b"asd   asd");
     }
 
     #[test]
@@ -460,9 +472,8 @@ mod test {
     #[test]
     fn parse_multipart() {
         let parsed = parse(
-            "--abc".as_bytes(),
-            "ignore this\r\n--abc\r\nContent-Type: text/plain\r\n\r\nThis is my text\r\n--abc\r\n\r\nThis has no content type\r\n\r\n--abc--this is ignored"
-                .as_bytes(),
+            b"--abc",
+            b"ignore this\r\n--abc\r\nContent-Type: text/plain\r\n\r\nThis is my text\r\n--abc\r\n\r\nThis has no content type\r\n\r\n--abc--this is ignored",
         );
         assert!(parsed.is_ok());
         let parsed = parsed.unwrap();
@@ -472,17 +483,16 @@ mod test {
             m.insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
             m
         });
-        assert_eq!(parsed[0].1, "This is my text".as_bytes());
+        assert_eq!(parsed[0].1, b"This is my text");
         assert_eq!(parsed[1].0, HeaderMap::new());
-        assert_eq!(parsed[1].1, "This has no content type\r\n".as_bytes());
+        assert_eq!(parsed[1].1, b"This has no content type\r\n");
     }
 
     #[test]
     fn parse_multipart_lwsp() {
         let parsed = parse(
-            "--abc".as_bytes(),
-            "ignore this\r\n--abc   \r\nContent-Type: text/plain; \r\n charset=utf-8 \r\nContent-Encoding: identity\r\n\r\nThis is my text\r\n--abc\r\n \r\n\r\nThis has no content type\r\n\r\n--abc--this is ignored"
-                .as_bytes(),
+            b"--abc",
+            b"ignore this\r\n--abc   \r\nContent-Type: text/plain; \r\n charset=utf-8 \r\nContent-Encoding: identity\r\n\r\nThis is my text\r\n--abc\r\n \r\n\r\nThis has no content type\r\n\r\n--abc--this is ignored",
         );
         assert!(parsed.is_ok());
         let parsed = parsed.unwrap();
@@ -493,9 +503,9 @@ mod test {
             m.insert(CONTENT_ENCODING, HeaderValue::from_static("identity"));
             m
         });
-        assert_eq!(parsed[0].1, "This is my text".as_bytes());
+        assert_eq!(parsed[0].1, b"This is my text");
         assert_eq!(parsed[1].0, HeaderMap::new());
-        assert_eq!(parsed[1].1, "This has no content type\r\n".as_bytes());
+        assert_eq!(parsed[1].1, b"This has no content type\r\n");
     }
 
     #[test]
@@ -522,21 +532,21 @@ mod test {
 
     #[test]
     fn skip_linear_whitespace() {
-        assert_eq!(super::skip_linear_whitespace("".as_bytes()), 0);
-        assert_eq!(super::skip_linear_whitespace(" ".as_bytes()), 1);
-        assert_eq!(super::skip_linear_whitespace("\t".as_bytes()), 1);
-        assert_eq!(super::skip_linear_whitespace("\r\n ".as_bytes()), 3);
-        assert_eq!(super::skip_linear_whitespace("\r\n\t".as_bytes()), 3);
-        assert_eq!(super::skip_linear_whitespace("\r\n".as_bytes()), 0);
-        assert_eq!(super::skip_linear_whitespace("\r\na".as_bytes()), 0);
-        assert_eq!(super::skip_linear_whitespace("   \r\n ".as_bytes()), 6);
-        assert_eq!(super::skip_linear_whitespace("   \t    asd".as_bytes()), 8);
-        assert_eq!(super::skip_linear_whitespace("   \r\n    asd".as_bytes()), 9);
-        assert_eq!(super::skip_linear_whitespace("\r\n \r\n   \r\n   asd".as_bytes()), 13);
-        assert_eq!(super::skip_linear_whitespace("asd".as_bytes()), 0);
-        assert_eq!(super::skip_linear_whitespace("       asd\r\n ".as_bytes()), 7);
-        assert_eq!(super::skip_linear_whitespace("    \r\n\r\n   asd".as_bytes()), 4);
-        assert_eq!(super::skip_linear_whitespace("   \r\r\n   asd".as_bytes()), 3);
-        assert_eq!(super::skip_linear_whitespace("  \n\r\n \n   asd".as_bytes()), 2);
+        assert_eq!(super::skip_linear_whitespace(b""), 0);
+        assert_eq!(super::skip_linear_whitespace(b" "), 1);
+        assert_eq!(super::skip_linear_whitespace(b"\t"), 1);
+        assert_eq!(super::skip_linear_whitespace(b"\r\n "), 3);
+        assert_eq!(super::skip_linear_whitespace(b"\r\n\t"), 3);
+        assert_eq!(super::skip_linear_whitespace(b"\r\n"), 0);
+        assert_eq!(super::skip_linear_whitespace(b"\r\na"), 0);
+        assert_eq!(super::skip_linear_whitespace(b"   \r\n "), 6);
+        assert_eq!(super::skip_linear_whitespace(b"   \t    asd"), 8);
+        assert_eq!(super::skip_linear_whitespace(b"   \r\n    asd"), 9);
+        assert_eq!(super::skip_linear_whitespace(b"\r\n \r\n   \r\n   asd"), 13);
+        assert_eq!(super::skip_linear_whitespace(b"asd"), 0);
+        assert_eq!(super::skip_linear_whitespace(b"       asd\r\n "), 7);
+        assert_eq!(super::skip_linear_whitespace(b"    \r\n\r\n   asd"), 4);
+        assert_eq!(super::skip_linear_whitespace(b"   \r\r\n   asd"), 3);
+        assert_eq!(super::skip_linear_whitespace(b"  \n\r\n \n   asd"), 2);
     }
 }

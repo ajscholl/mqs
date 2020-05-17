@@ -40,7 +40,7 @@ mod status;
 pub use status::*;
 
 /// Content type used if the client does not specify one.
-pub const DEFAULT_CONTENT_TYPE: &'static str = "application/octet-stream";
+pub const DEFAULT_CONTENT_TYPE: &str = "application/octet-stream";
 /// Header containing the trace id.
 pub const TRACE_ID_HEADER: TraceIdHeader = TraceIdHeader {};
 
@@ -55,9 +55,7 @@ impl TraceIdHeader {
     /// use hyper::header::HeaderName;
     /// use mqs_common::TRACE_ID_HEADER;
     ///
-    /// fn main() {
-    ///     assert_eq!(HeaderName::from_static("x-trace-id"), TRACE_ID_HEADER.name());
-    /// }
+    /// assert_eq!(HeaderName::from_static("x-trace-id"), TRACE_ID_HEADER.name());
     /// ```
     pub fn name(&self) -> HeaderName {
         HeaderName::from_static("x-trace-id")
@@ -68,9 +66,7 @@ impl TraceIdHeader {
     /// ```
     /// use mqs_common::TRACE_ID_HEADER;
     ///
-    /// fn main() {
-    ///     assert_eq!("X-TRACE-ID", &TRACE_ID_HEADER.upper());
-    /// }
+    /// assert_eq!("X-TRACE-ID", &TRACE_ID_HEADER.upper());
     /// ```
     pub fn upper(&self) -> String {
         self.name().as_str().to_uppercase()
@@ -82,22 +78,19 @@ impl TraceIdHeader {
     /// use hyper::{header::HeaderValue, HeaderMap};
     /// use mqs_common::TRACE_ID_HEADER;
     ///
-    /// fn main() {
-    ///     let mut headers = HeaderMap::new();
-    ///     assert_eq!(TRACE_ID_HEADER.get(&headers), None);
-    ///     headers.insert(
-    ///         TRACE_ID_HEADER.name(),
-    ///         HeaderValue::from_static("2e372a3a-9dff-4c61-8678-753bbdf4295e"),
-    ///     );
-    ///     assert_eq!(
-    ///         TRACE_ID_HEADER.get(&headers),
-    ///         Some("2e372a3a-9dff-4c61-8678-753bbdf4295e".parse().unwrap())
-    ///     );
-    /// }
+    /// let mut headers = HeaderMap::new();
+    /// assert_eq!(TRACE_ID_HEADER.get(&headers), None);
+    /// headers.insert(
+    ///     TRACE_ID_HEADER.name(),
+    ///     HeaderValue::from_static("2e372a3a-9dff-4c61-8678-753bbdf4295e"),
+    /// );
+    /// assert_eq!(
+    ///     TRACE_ID_HEADER.get(&headers),
+    ///     Some("2e372a3a-9dff-4c61-8678-753bbdf4295e".parse().unwrap())
+    /// );
     /// ```
     pub fn get(&self, headers: &HeaderMap) -> Option<Uuid> {
-        get_header(headers, self.name())
-            .map_or_else(|| None, |s| Uuid::parse_str(s).map_or_else(|_| None, |id| Some(id)))
+        get_header(headers, self.name()).map_or_else(|| None, |s| Uuid::parse_str(s).map_or_else(|_| None, Some))
     }
 }
 
@@ -110,17 +103,15 @@ impl TraceIdHeader {
 /// };
 /// use mqs_common::get_header;
 ///
-/// fn main() {
-///     let mut headers = HeaderMap::new();
-///     assert_eq!(get_header(&headers, CONTENT_TYPE), None);
-///     headers.insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
-///     assert_eq!(get_header(&headers, CONTENT_TYPE), Some("text/plain"));
-/// }
+/// let mut headers = HeaderMap::new();
+/// assert_eq!(get_header(&headers, CONTENT_TYPE), None);
+/// headers.insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
+/// assert_eq!(get_header(&headers, CONTENT_TYPE), Some("text/plain"));
 /// ```
 pub fn get_header(headers: &HeaderMap, header: HeaderName) -> Option<&str> {
     headers
         .get(header)
-        .map_or_else(|| None, |v| v.to_str().map_or_else(|_| None, |s| Some(s)))
+        .map_or_else(|| None, |v| v.to_str().map_or_else(|_| None, Some))
 }
 
 /// Queue configuration send to the server by the client.
@@ -201,36 +192,34 @@ impl QueueConfigOutput {
     /// ```
     /// use mqs_common::{QueueConfigOutput, QueueDescriptionOutput, QueueRedrivePolicy, QueueStatus};
     ///
-    /// fn main() {
-    ///     let output = QueueConfigOutput {
-    ///         name:                  "queue".to_string(),
-    ///         redrive_policy:        Some(QueueRedrivePolicy {
-    ///             max_receives:      5,
-    ///             dead_letter_queue: "queue-dead".to_string(),
-    ///         }),
-    ///         retention_timeout:     3600,
-    ///         visibility_timeout:    30,
-    ///         message_delay:         0,
-    ///         message_deduplication: true,
-    ///     };
-    ///     let description = output.into_description(10, 3, 50);
-    ///     assert_eq!(description, QueueDescriptionOutput {
-    ///         name:                  "queue".to_string(),
-    ///         redrive_policy:        Some(QueueRedrivePolicy {
-    ///             max_receives:      5,
-    ///             dead_letter_queue: "queue-dead".to_string(),
-    ///         }),
-    ///         retention_timeout:     3600,
-    ///         visibility_timeout:    30,
-    ///         message_delay:         0,
-    ///         message_deduplication: true,
-    ///         status:                QueueStatus {
-    ///             messages:           10,
-    ///             visible_messages:   3,
-    ///             oldest_message_age: 50,
-    ///         },
-    ///     });
-    /// }
+    /// let output = QueueConfigOutput {
+    ///     name:                  "queue".to_string(),
+    ///     redrive_policy:        Some(QueueRedrivePolicy {
+    ///         max_receives:      5,
+    ///         dead_letter_queue: "queue-dead".to_string(),
+    ///     }),
+    ///     retention_timeout:     3600,
+    ///     visibility_timeout:    30,
+    ///     message_delay:         0,
+    ///     message_deduplication: true,
+    /// };
+    /// let description = output.into_description(10, 3, 50);
+    /// assert_eq!(description, QueueDescriptionOutput {
+    ///     name:                  "queue".to_string(),
+    ///     redrive_policy:        Some(QueueRedrivePolicy {
+    ///         max_receives:      5,
+    ///         dead_letter_queue: "queue-dead".to_string(),
+    ///     }),
+    ///     retention_timeout:     3600,
+    ///     visibility_timeout:    30,
+    ///     message_delay:         0,
+    ///     message_deduplication: true,
+    ///     status:                QueueStatus {
+    ///         messages:           10,
+    ///         visible_messages:   3,
+    ///         oldest_message_age: 50,
+    ///     },
+    /// });
     /// ```
     pub fn into_description(
         self,
@@ -313,13 +302,11 @@ pub mod test {
     /// ```
     /// use mqs_common::test::make_runtime;
     ///
-    /// fn main() {
-    ///     let mut done = false;
-    ///     make_runtime().block_on(async {
-    ///         done = true;
-    ///     });
-    ///     assert!(done);
-    /// }
+    /// let mut done = false;
+    /// make_runtime().block_on(async {
+    ///     done = true;
+    /// });
+    /// assert!(done);
     /// ```
     pub fn make_runtime() -> Runtime {
         Builder::new().enable_all().basic_scheduler().build().unwrap()
@@ -332,11 +319,9 @@ pub mod test {
     /// use hyper::Body;
     /// use mqs_common::test::read_body;
     ///
-    /// fn main() {
-    ///     let mut body = Body::from("some body");
-    ///     let read = read_body(&mut body);
-    ///     assert_eq!(read.as_slice(), "some body".as_bytes());
-    /// }
+    /// let mut body = Body::from("some body");
+    /// let read = read_body(&mut body);
+    /// assert_eq!(read.as_slice(), "some body".as_bytes());
     /// ```
     pub fn read_body(body: &mut Body) -> Vec<u8> {
         make_runtime().block_on(async { crate::read_body(body, None).await.unwrap().unwrap() })
@@ -355,7 +340,7 @@ pub mod test {
                 .await
                 .unwrap()
         });
-        assert_eq!(read, Some("this is ok".as_bytes().to_vec()));
+        assert_eq!(read, Some(b"this is ok".to_vec()));
     }
 
     #[test]

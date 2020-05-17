@@ -82,10 +82,9 @@ impl HandlerService {
     }
 
     async fn handle(&self, req: Request<Body>) -> Result<Response<Body>, Infallible> {
-        let conn = self.pool.get().map_or_else(|_| None, |conn| Some(conn));
-        let repo = match conn {
-            None => None,
-            Some(conn) => Some(PgRepository::new(conn)),
+        let repo = match self.pool.get() {
+            Err(_) => None,
+            Ok(conn) => Some(PgRepository::new(conn)),
         };
         handle(
             repo,
