@@ -37,6 +37,84 @@ pub use status::*;
 /// Content type used if the client does not specify one.
 pub const DEFAULT_CONTENT_TYPE: &str = "application/octet-stream";
 
+/// Header containing the message id.
+#[derive(Clone, Copy)]
+pub struct MessageIdHeader {}
+
+impl MessageIdHeader {
+    /// Get the name of the header containing the message id.
+    ///
+    /// ```
+    /// use hyper::header::HeaderName;
+    /// use mqs_common::MessageIdHeader;
+    ///
+    /// assert_eq!(HeaderName::from_static("x-mqs-message-id"), MessageIdHeader::name());
+    /// ```
+    #[must_use]
+    pub fn name() -> HeaderName {
+        HeaderName::from_static("x-mqs-message-id")
+    }
+
+    /// Get the message id from the headers or an empty string if no id was set.
+    ///
+    /// ```
+    /// use http::HeaderValue;
+    /// use hyper::HeaderMap;
+    /// use mqs_common::MessageIdHeader;
+    ///
+    /// let mut headers = HeaderMap::new();
+    /// assert_eq!(MessageIdHeader::get(&headers), "".to_string());
+    /// headers.insert(MessageIdHeader::name(), HeaderValue::from_static("my value"));
+    /// assert_eq!(MessageIdHeader::get(&headers), "my value".to_string());
+    /// ```
+    #[must_use]
+    pub fn get(headers: &HeaderMap) -> String {
+        get_header(headers, Self::name()).map_or_else(String::new, ToString::to_string)
+    }
+}
+
+/// Header containing the number of times a message was already received.
+#[derive(Clone, Copy)]
+pub struct MessageReceivesHeader {}
+
+impl MessageReceivesHeader {
+    /// Get the name of the header containing the number of message receives.
+    ///
+    /// ```
+    /// use hyper::header::HeaderName;
+    /// use mqs_common::MessageReceivesHeader;
+    ///
+    /// assert_eq!(
+    ///     HeaderName::from_static("x-mqs-message-receives"),
+    ///     MessageReceivesHeader::name()
+    /// );
+    /// ```
+    #[must_use]
+    pub fn name() -> HeaderName {
+        HeaderName::from_static("x-mqs-message-receives")
+    }
+
+    /// Get the number of times a message was already received.
+    /// Returns 0 in case the header is missing or contains an invalid value.
+    ///
+    /// ```
+    /// use http::HeaderValue;
+    /// use hyper::HeaderMap;
+    /// use mqs_common::MessageReceivesHeader;
+    ///
+    /// let mut headers = HeaderMap::new();
+    /// assert_eq!(MessageReceivesHeader::get(&headers), 0);
+    /// headers.insert(MessageReceivesHeader::name(), HeaderValue::from_static("not a number"));
+    /// assert_eq!(MessageReceivesHeader::get(&headers), 0);
+    /// headers.insert(MessageReceivesHeader::name(), HeaderValue::from_static("42"));
+    /// assert_eq!(MessageReceivesHeader::get(&headers), 42);
+    /// ```
+    #[must_use]
+    pub fn get(headers: &HeaderMap) -> i32 {
+        get_header(headers, Self::name()).map_or_else(|| 0, |s| s.parse().unwrap_or(0))
+    }
+}
+
 /// Header containing the trace id.
 #[derive(Clone, Copy)]
 pub struct TraceIdHeader {}

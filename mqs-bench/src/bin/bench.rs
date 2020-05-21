@@ -306,6 +306,9 @@ async fn consume_messages(index: usize, queue: String, timeout: Option<u16>) -> 
                     if message.trace_id != DEFAULT_TRACE_ID[index % DEFAULT_TRACE_ID.len()] {
                         return Err(StringError::new("Message trace id does not match").into());
                     }
+                    if message.message_receives != 1 {
+                        return Err(StringError::new("Message was received wrong number of times").into());
+                    }
                     if message.content.as_slice() != DEFAULT_MESSAGE[index % DEFAULT_MESSAGE.len()] {
                         return Err(StringError::new("Message content does not match").into());
                     }

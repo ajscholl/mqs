@@ -1,9 +1,9 @@
 use hyper::{
-    header::{HeaderName, HeaderValue, CONTENT_ENCODING, CONTENT_TYPE},
+    header::{HeaderValue, CONTENT_ENCODING, CONTENT_TYPE},
     Body,
     HeaderMap,
 };
-use mqs_common::{multipart, Status, TraceIdHeader};
+use mqs_common::{multipart, MessageIdHeader, MessageReceivesHeader, Status, TraceIdHeader};
 use serde::Serialize;
 
 use crate::models::message::Message;
@@ -113,7 +113,10 @@ impl MqsResponse {
             }
         }
         if let Ok(value) = HeaderValue::from_str(&message.id.to_string()) {
-            headers.insert(HeaderName::from_static("x-mqs-message-id"), value);
+            headers.insert(MessageIdHeader::name(), value);
+        }
+        if let Ok(value) = HeaderValue::from_str(&format!("{}", message.receives)) {
+            headers.insert(MessageReceivesHeader::name(), value);
         }
     }
 }
@@ -193,8 +196,8 @@ pub(crate) mod test {
             content_type:     "text/plain".to_string(),
             content_encoding: encoding,
             hash:             None,
-            queue:            "".to_string(),
-            receives:         0,
+            queue:            String::new(),
+            receives:         index as i32 + 1,
             visible_since:    now.naive_utc(),
             created_at:       now.naive_utc(),
             trace_id:         None,
@@ -204,14 +207,9 @@ pub(crate) mod test {
     fn message_response_single_with_encoding(encoding: Option<String>) {
         let mut response = MqsResponse::messages(vec![mk_message(0, encoding.clone())]).into_response();
         assert_eq!(response.status().as_u16(), Status::Ok as u16);
-        assert_eq!(response.headers().len(), if encoding.is_some() { 3 } else { 2 });
+        assert_eq!(response.headers().len(), if encoding.is_some() { 4 } else { 3 });
         let ct = response.headers().get(CONTENT_TYPE).unwrap().to_str().unwrap();
-        let message_id = response
-            .headers()
-            .get(HeaderName::from_static("x-mqs-message-id"))
-            .unwrap()
-            .to_str()
-            .unwrap();
+        let message_id = MessageIdHeader::get(response.headers());
         assert_eq!(ct, "text/plain");
         assert_eq!(message_id, "0a141e28-0b15-1f29-0c16-202b0e18222c");
         if let Some(encoding) = encoding {
@@ -245,12 +243,14 @@ pub(crate) mod test {
             let encoding_header = if let Some(encoding) = encoding {
                 format!("content-encoding: {}\r\n", encoding)
             } else {
-                "".to_string()
+                String::new()
             };
             assert_eq!(
                 read_body(response.body_mut()).as_slice(),
                 format!(
-                    "{}\r\ncontent-type: text/plain\r\n{}x-mqs-message-id: {}\r\n\r\nABC\r\n{}\r\ncontent-type: text/plain\r\n{}x-mqs-message-id: {}\r\n\r\nABC\r\n{}\r\ncontent-type: text/plain\r\n{}x-mqs-message-id: {}\r\n\r\nABC\r\n{}--",
+                    "{}\r\ncontent-type: text/plain\r\n{}x-mqs-message-id: {}\r\nx-mqs-message-receives: 1\r\n\r\nABC\r\n\
+                    {}\r\ncontent-type: text/plain\r\n{}x-mqs-message-id: {}\r\nx-mqs-message-receives: 2\r\n\r\nABC\r\n\
+                    {}\r\ncontent-type: text/plain\r\n{}x-mqs-message-id: {}\r\nx-mqs-message-receives: 3\r\n\r\nABC\r\n{}--",
                     boundary,
                     encoding_header,
                     "0a141e28-0b15-1f29-0c16-202b0e18222c",

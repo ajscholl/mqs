@@ -71,10 +71,11 @@ mod test {
         queue::QueueInput,
         test::{CloneSource, TestRepo},
     };
-    use hyper::{header::HeaderName, Body, Request, Response, StatusCode};
+    use hyper::{Body, Request, Response, StatusCode};
     use mqs_common::{
         router::Handler,
         test::{make_runtime, read_body},
+        MessageIdHeader,
         Status,
     };
     use std::sync::{Arc, Mutex};
@@ -252,9 +253,9 @@ mod test {
             assert_eq!(StatusCode::from(Status::Ok), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(body.as_slice(), b"{\"content\": \"my message\"}");
-            let response_message_id = response.headers().get(HeaderName::from_static("x-mqs-message-id"));
-            assert!(response_message_id.is_some());
-            response_message_id.unwrap().to_str().unwrap().to_string()
+            let response_message_id = MessageIdHeader::get(response.headers());
+            assert!(!response_message_id.is_empty());
+            response_message_id
         };
         {
             let delete_handler = router.route(&Method::DELETE, vec!["messages", &message_id].into_iter());

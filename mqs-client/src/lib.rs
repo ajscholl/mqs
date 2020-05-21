@@ -48,6 +48,8 @@ use hyper::{
 use mqs_common::{
     multipart,
     read_body,
+    MessageIdHeader,
+    MessageReceivesHeader,
     QueueConfig,
     QueueDescriptionOutput,
     QueuesResponse,
@@ -184,6 +186,8 @@ pub struct MessageResponse {
     pub content_type:     String,
     /// Content encoding of the message.
     pub content_encoding: Option<String>,
+    /// Number of times this message was already received.
+    pub message_receives: i32,
     /// Trace id of the message.
     pub trace_id:         Option<Uuid>,
     /// Encoded body of the message.
@@ -528,10 +532,7 @@ impl Service {
         headers: &HeaderMap,
         get_body: F,
     ) -> Result<MessageResponse, ClientError> {
-        let message_id = headers
-            .get("X-MQS-MESSAGE-ID")
-            .map_or_else(|| "", |h| h.to_str().unwrap_or(""))
-            .to_string();
+        let message_id = MessageIdHeader::get(headers);
         let content_type = headers
             .get(CONTENT_TYPE)
             .map_or_else(|| DEFAULT_CONTENT_TYPE, |h| h.to_str().unwrap_or(DEFAULT_CONTENT_TYPE))
@@ -539,18 +540,20 @@ impl Service {
         let content_encoding = headers
             .get(CONTENT_ENCODING)
             .map_or_else(|| None, |h| h.to_str().map_or_else(|_| None, |s| Some(s.to_string())));
+        let message_receives = MessageReceivesHeader::get(headers);
         let trace_id = TraceIdHeader::get(headers);
         let content = get_body()?;
         Ok(MessageResponse {
             message_id,
             content_type,
             content_encoding,
+            message_receives,
             trace_id,
             content,
         })
     }
 
-    /// Receive one or more message from a queue.
+    /// Receive one or more messages from a queue.
     ///
     /// For example, to retrieve up to 20 messages, waiting up to 10 seconds,
     /// the following function could be used:
