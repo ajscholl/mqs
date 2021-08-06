@@ -8,56 +8,57 @@ edition = "2018"
 path = "../mqs-common"
 
 [dependencies.async-trait]
-version = "0.1.26"
+version = "0.1.51"
 
 [dependencies.base64]
-version = "0.12.0"
+version = "0.13.0"
 
 [dependencies.cached]
-version = "0.12.0"
+version = "0.24.0"
 
 [dependencies.chrono]
-version = "0.4.10"
+version = "0.4.19"
 features = ["serde"]
 
 [dependencies.diesel]
-version = "1.4.4"
+version = "1.4.7"
 features = ["postgres", "chrono", "uuidv07"]
 
 [dependencies.dotenv]
 version = "0.15.0"
 
 [dependencies.hyper]
-version = "0.13"
+version = "=0.14.4"
+features = ["server", "http1", "http2", "runtime"]
 
 [dependencies.tokio]
-version = "0.2.20"
-features = ["rt-core", "rt-threaded", "rt-util", "sync", "blocking", "tcp", "time"]
+version = "1.9.0"
+features = ["rt", "rt-multi-thread", "sync", "net", "time"]
 
 [dependencies.log]
-version = "0.4.8"
+version = "0.4.14"
 
 [dependencies.r2d2]
-version = "0.8.8"
+version = "0.8.9"
 
 [dependencies.r2d2-diesel]
-version = "1.0"
+version = "1.0.0"
 
 [dependencies.sha2]
-version = "0.8.1"
+version = "0.9.5"
 
 [dependencies.serde]
-version = "1.0.106"
+version = "1.0.127"
 
 [dependencies.serde_derive]
-version = "1.0.106"
+version = "1.0.127"
 
 [dependencies.serde_json]
-version = "1.0.52"
+version = "1.0.66"
 
 [dependencies.uuid]
-version = "0.8.1"
+version = "0.8.2"
 features = ["serde", "v4"]
 
 [dependencies.url]
-version = "2.1.1"
+version = "2.2.2"

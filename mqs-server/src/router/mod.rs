@@ -88,7 +88,7 @@ mod test {
         repo: &R,
         body: Vec<u8>,
     ) -> Response<Body> {
-        let mut rt = make_runtime();
+        let rt = make_runtime();
         rt.block_on(async {
             handler
                 .handle(

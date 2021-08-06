@@ -1,5 +1,4 @@
 use diesel::{prelude::*, sql_types::Int4};
-use std::ops::Deref;
 
 use crate::models::PgRepository;
 
@@ -15,7 +14,7 @@ pub trait HealthCheckRepository: Send {
 
 impl HealthCheckRepository for PgRepository {
     fn check_health(&self) -> bool {
-        let responses: Result<Vec<Health>, _> = diesel::sql_query("select 1 as response").load(self.conn.deref());
+        let responses: Result<Vec<Health>, _> = diesel::sql_query("select 1 as response").load(&*self.conn);
         match responses {
             Ok(response) => response.iter().len() == 1 && response[0].response == 1,
             Err(_err) => false,

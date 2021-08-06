@@ -29,37 +29,29 @@ impl<R: MessageRepository + QueueRepository, S: Source<R>> Handler<(R, S)> for R
     {
         let message_count = {
             let header_value = get_header(req.headers(), HeaderName::from_static("x-mqs-max-messages"));
-            if let Some(max_messages) = header_value {
-                match max_messages.parse() {
-                    Err(_) => Err(()),
-                    Ok(n) => {
-                        if n > 0 && n < 1000 {
-                            Ok(MessageCount(n))
-                        } else {
-                            Err(())
-                        }
-                    },
-                }
-            } else {
-                Ok(MessageCount(1))
-            }
+            header_value.map_or(Ok(MessageCount(1)), |max_messages| match max_messages.parse() {
+                Err(_) => Err(()),
+                Ok(n) => {
+                    if n > 0 && n < 1000 {
+                        Ok(MessageCount(n))
+                    } else {
+                        Err(())
+                    }
+                },
+            })
         };
         let max_wait_time = {
             let header_value = get_header(req.headers(), HeaderName::from_static("x-mqs-max-wait-time"));
-            if let Some(max_wait_time) = header_value {
-                match max_wait_time.parse() {
-                    Err(_) => Err(()),
-                    Ok(n) => {
-                        if n > 0 && n < 20 {
-                            Ok(Some(MaxWaitTime(n)))
-                        } else {
-                            Err(())
-                        }
-                    },
-                }
-            } else {
-                Ok(None)
-            }
+            header_value.map_or(Ok(None), |max_wait_time| match max_wait_time.parse() {
+                Err(_) => Err(()),
+                Ok(n) => {
+                    if n > 0 && n < 20 {
+                        Ok(Some(MaxWaitTime(n)))
+                    } else {
+                        Err(())
+                    }
+                },
+            })
         };
         receive(repo, repo_source, &self.queue_name, message_count, max_wait_time)
             .await

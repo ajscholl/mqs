@@ -8,7 +8,6 @@ use diesel::{
 use mqs_common::{QueueConfig, QueueConfigOutput, QueueRedrivePolicy};
 use std::{
     convert::TryFrom,
-    ops::Deref,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Mutex,
@@ -35,10 +34,7 @@ impl<'a> QueueInput<'a> {
     pub(crate) fn new(config: &'a QueueConfig, queue_name: &'a str) -> Self {
         QueueInput {
             name:                        queue_name,
-            max_receives:                match &config.redrive_policy {
-                None => None,
-                Some(p) => Some(p.max_receives),
-            },
+            max_receives:                config.redrive_policy.as_ref().map(|p| p.max_receives),
             dead_letter_queue:           match &config.redrive_policy {
                 None => None,
                 Some(p) => Some(&p.dead_letter_queue),
@@ -184,7 +180,7 @@ impl QueueSource for PgRepository {
     fn find_by_name(&self, name: &str) -> QueryResult<Option<Queue>> {
         queues::table
             .filter(queues::name.eq(name))
-            .first::<Queue>(self.conn.deref())
+            .first::<Queue>(&*self.conn)
             .optional()
     }
 }
@@ -208,7 +204,7 @@ impl QueueRepository for PgRepository {
                 updated_at:                  now.naive_utc(),
             })
             .returning(queues::all_columns)
-            .get_result(self.conn.deref());
+            .get_result(&*self.conn);
         match result {
             Ok(queue) => Ok(Some(queue)),
             Err(Error::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => Ok(None),
@@ -217,7 +213,7 @@ impl QueueRepository for PgRepository {
     }
 
     fn count_queues(&self) -> QueryResult<i64> {
-        queues::table.count().get_result(self.conn.deref())
+        queues::table.count().get_result(&*self.conn)
     }
 
     fn describe_queue(&self, name: &str) -> QueryResult<Option<QueueDescription>> {
@@ -227,7 +223,7 @@ impl QueueRepository for PgRepository {
                 let messages = messages::table
                     .filter(messages::queue.eq(&queue.name))
                     .count()
-                    .get_result(self.conn.deref())?;
+                    .get_result(&*self.conn)?;
                 let now = Utc::now();
                 let visible_messages = messages::table
                     .filter(
@@ -236,7 +232,7 @@ impl QueueRepository for PgRepository {
                             .and(messages::visible_since.le(now.naive_utc())),
                     )
                     .count()
-                    .get_result(self.conn.deref())?;
+                    .get_result(&*self.conn)?;
                 let oldest_message: Option<NaiveDateTime> = messages::table
                     .select(messages::created_at)
                     .filter(messages::queue.eq(&queue.name))
@@ -244,7 +240,7 @@ impl QueueRepository for PgRepository {
                     .order(messages::created_at.asc())
                     .for_key_share()
                     .skip_locked()
-                    .get_result(self.conn.deref())
+                    .get_result(&*self.conn)
                     .optional()?;
 
                 Ok(Some(QueueDescription {
@@ -265,12 +261,12 @@ impl QueueRepository for PgRepository {
 
         match offset {
             None => match limit {
-                None => query.get_results(self.conn.deref()),
-                Some(limit) => query.limit(limit).get_results(self.conn.deref()),
+                None => query.get_results(&*self.conn),
+                Some(limit) => query.limit(limit).get_results(&*self.conn),
             },
             Some(offset) => match limit {
-                None => query.offset(offset).get_results(self.conn.deref()),
-                Some(limit) => query.offset(offset).limit(limit).get_results(self.conn.deref()),
+                None => query.offset(offset).get_results(&*self.conn),
+                Some(limit) => query.offset(offset).limit(limit).get_results(&*self.conn),
             },
         }
     }
@@ -279,10 +275,7 @@ impl QueueRepository for PgRepository {
         diesel::dsl::update(queues::table.filter(queues::name.eq(queue.name)))
             .set((
                 queues::max_receives.eq(queue.max_receives),
-                queues::dead_letter_queue.eq(match queue.dead_letter_queue {
-                    None => None,
-                    Some(s) => Some(s),
-                }),
+                queues::dead_letter_queue.eq(queue.dead_letter_queue),
                 queues::retention_timeout.eq(pg_interval(queue.retention_timeout)),
                 queues::visibility_timeout.eq(pg_interval(queue.visibility_timeout)),
                 queues::message_delay.eq(pg_interval(queue.message_delay)),
@@ -290,14 +283,14 @@ impl QueueRepository for PgRepository {
                 queues::updated_at.eq(Utc::now().naive_utc()),
             ))
             .returning(queues::all_columns)
-            .get_result(self.conn.deref())
+            .get_result(&*self.conn)
             .optional()
     }
 
     fn delete_queue_by_name(&self, name: &str) -> QueryResult<Option<Queue>> {
         diesel::dsl::delete(queues::table.filter(queues::name.eq(name)))
             .returning(queues::all_columns)
-            .get_result(self.conn.deref())
+            .get_result(&*self.conn)
             .optional()
     }
 }

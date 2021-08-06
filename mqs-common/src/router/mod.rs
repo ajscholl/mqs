@@ -183,7 +183,7 @@ pub(crate) mod test {
     fn route_simple_root() {
         let router = Router::new_simple(Method::GET, SimpleHandler);
         let handler = router.route(&Method::GET, vec![""].into_iter()).unwrap();
-        let mut rt = make_runtime();
+        let rt = make_runtime();
         let response = rt.block_on(async { handler.handle((), Request::new(Body::default()), Vec::new()).await });
         assert_eq!(
             response.headers().get("X-SIMPLE-HANDLER"),
@@ -199,7 +199,7 @@ pub(crate) mod test {
         assert!(router.route(&Method::GET, vec!["another", "sub"].into_iter()).is_none());
         assert!(router.route(&Method::POST, vec!["sub"].into_iter()).is_none());
         let handler = router.route(&Method::GET, vec!["sub"].into_iter()).unwrap();
-        let mut rt = make_runtime();
+        let rt = make_runtime();
         let response = rt.block_on(async { handler.handle((), Request::new(Body::default()), Vec::new()).await });
         assert_eq!(
             response.headers().get("X-SIMPLE-HANDLER"),
@@ -230,7 +230,7 @@ pub(crate) mod test {
         assert!(router.route(&Method::GET, vec!["sub", "route"].into_iter()).is_none());
         {
             let handler = router.route(&Method::POST, vec!["sub", "route"].into_iter()).unwrap();
-            let mut rt = make_runtime();
+            let rt = make_runtime();
             let response = rt.block_on(async { handler.handle((), Request::new(Body::default()), Vec::new()).await });
             assert_eq!(
                 response.headers().get("X-SIMPLE-HANDLER"),
@@ -239,7 +239,7 @@ pub(crate) mod test {
         }
         {
             let handler = router.route(&Method::GET, vec!["sub", "static"].into_iter()).unwrap();
-            let mut rt = make_runtime();
+            let rt = make_runtime();
             let response = rt.block_on(async { handler.handle((), Request::new(Body::default()), Vec::new()).await });
             assert_eq!(
                 response.headers().get("X-STATIC-HANDLER"),
@@ -248,7 +248,7 @@ pub(crate) mod test {
         }
         {
             let handler = router.route(&Method::GET, vec!["sub"].into_iter()).unwrap();
-            let mut rt = make_runtime();
+            let rt = make_runtime();
             let response = rt.block_on(async { handler.handle((), Request::new(Body::default()), Vec::new()).await });
             assert_eq!(
                 response.headers().get("X-STATIC-HANDLER"),
@@ -257,7 +257,7 @@ pub(crate) mod test {
         }
         {
             let handler = router.route(&Method::POST, vec!["sub"].into_iter()).unwrap();
-            let mut rt = make_runtime();
+            let rt = make_runtime();
             let response = rt.block_on(async { handler.handle((), Request::new(Body::default()), Vec::new()).await });
             assert_eq!(
                 response.headers().get("X-STATIC-HANDLER"),
@@ -280,7 +280,7 @@ pub(crate) mod test {
             .is_none());
         {
             let handler = router.route(&Method::GET, vec!["simple"].into_iter()).unwrap();
-            let mut rt = make_runtime();
+            let rt = make_runtime();
             let response = rt.block_on(async { handler.handle((), Request::new(Body::default()), Vec::new()).await });
             assert_eq!(
                 response.headers().get("X-SIMPLE-HANDLER"),
@@ -289,7 +289,7 @@ pub(crate) mod test {
         }
         {
             let handler = router.route(&Method::GET, vec!["collect", "a"].into_iter()).unwrap();
-            let mut rt = make_runtime();
+            let rt = make_runtime();
             let response = rt.block_on(async { handler.handle((), Request::new(Body::default()), Vec::new()).await });
             assert_eq!(
                 response.headers().get("X-COLLECTED"),
@@ -304,7 +304,7 @@ pub(crate) mod test {
             let handler = router
                 .route(&Method::GET, vec!["collect", "a", "b"].into_iter())
                 .unwrap();
-            let mut rt = make_runtime();
+            let rt = make_runtime();
             let response = rt.block_on(async { handler.handle((), Request::new(Body::default()), Vec::new()).await });
             assert_eq!(
                 response.headers().get("X-COLLECTED"),
@@ -319,7 +319,7 @@ pub(crate) mod test {
             let handler = router
                 .route(&Method::GET, vec!["collect", "a", "b", "c"].into_iter())
                 .unwrap();
-            let mut rt = make_runtime();
+            let rt = make_runtime();
             let response = rt.block_on(async { handler.handle((), Request::new(Body::default()), Vec::new()).await });
             assert_eq!(
                 response.headers().get("X-COLLECTED"),

@@ -28,7 +28,7 @@ use hyper::{
 };
 use log::{Level, Log};
 use std::{convert::Infallible, env, env::VarError, io::Stdout, net::SocketAddr, sync::Arc, time::Duration};
-use tokio::{runtime::Builder, time::delay_for};
+use tokio::{runtime::Builder, time::sleep};
 
 use mqs_common::{
     logger::{configure_logger, create_trace_id, json::Logger, with_trace_id, NewJsonLogger},
@@ -115,17 +115,16 @@ fn main() {
     configure_logger(&*LOGGER);
 
     let (pool, pool_size) = init_pool_maybe().expect("Failed to initialize database pool");
-    let mut rt = Builder::new()
+    let rt = Builder::new_multi_thread()
         .enable_all()
-        .threaded_scheduler()
-        .core_threads(pool_size as usize)
+        .worker_threads(pool_size as usize)
         .build()
         .unwrap();
     let service = Arc::new(HandlerService::new(pool, make_router(), get_max_message_size()));
 
     rt.spawn(async {
         loop {
-            delay_for(Duration::from_secs(10)).await;
+            sleep(Duration::from_secs(10)).await;
             LOGGER.flush();
         }
     });
@@ -157,5 +156,5 @@ fn main() {
 
         info!("Shutting down server");
         LOGGER.flush();
-    })
+    });
 }

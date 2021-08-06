@@ -56,10 +56,9 @@ fn get_service() -> Service {
 }
 
 fn main() -> Result<(), AnyError> {
-    let mut rt = Builder::new()
+    let rt = Builder::new_multi_thread()
         .enable_all()
-        .threaded_scheduler()
-        .core_threads(NUM_THREADS)
+        .worker_threads(NUM_THREADS)
         .build()
         .unwrap();
 
@@ -93,7 +92,7 @@ fn main() -> Result<(), AnyError> {
         let start_publish = Utc::now();
         publish_test_messages(queue_count).await?;
         let start_consume = Utc::now();
-        let publish_took = start_consume.clone().sub(start_publish);
+        let publish_took = start_consume.sub(start_publish);
         println!("Publishing took: {}", publish_took);
 
         consume_test_messages(queue_count).await?;
@@ -226,15 +225,16 @@ async fn publish_and_consume_test_messages(queue_count: usize) -> Result<(), Any
 
 async fn check_queue_empty(s: &Service, queue: &str) -> Result<(), AnyError> {
     let info = s.describe_queue(queue, None).await?;
-    if let Some(description) = info {
-        if description.status.messages == 0 {
-            Ok(())
-        } else {
-            Err(StringError::new("Queue not yet empty").into())
-        }
-    } else {
-        Err(StringError::new("Failed to describe queue").into())
-    }
+    info.map_or_else(
+        || Err(StringError::new("Failed to describe queue").into()),
+        |description| {
+            if description.status.messages == 0 {
+                Ok(())
+            } else {
+                Err(StringError::new("Queue not yet empty").into())
+            }
+        },
+    )
 }
 
 const DEFAULT_MESSAGE: [&[u8]; 3] = [

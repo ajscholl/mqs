@@ -184,20 +184,15 @@ impl<'a, 'b, M: Matcher + ?Sized> Iterator for Split<'a, 'b, M> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(data) = self.data {
-            Some(match split_by(data, self.split_by) {
-                None => {
-                    self.data = None;
-                    data
-                },
-                Some((elem, rest)) => {
-                    self.data = Some(rest);
-                    elem
-                },
-            })
-        } else {
-            None
-        }
+        self.data.map(|data| {
+            if let Some((elem, rest)) = split_by(data, self.split_by) {
+                self.data = Some(rest);
+                elem
+            } else {
+                self.data = None;
+                data
+            }
+        })
     }
 }
 
@@ -342,7 +337,7 @@ fn trim_bytes(data: &[u8]) -> &[u8] {
 // HTAB    =  %x09               ; horizontal tab
 // CR      =  %x0D               ; carriage return
 // LF      =  %x0A               ; linefeed
-fn skip_linear_whitespace(data: &[u8]) -> usize {
+const fn skip_linear_whitespace(data: &[u8]) -> usize {
     let mut pos = 0;
 
     while data.len() > pos {

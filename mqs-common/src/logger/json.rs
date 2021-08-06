@@ -105,9 +105,8 @@ impl<W: Write + Send> Log for Logger<W> {
             if let Ok(mut line) = serde_json::to_vec(&msg) {
                 line.push(b'\n');
                 if let Ok(mut writer) = self.writer.lock() {
-                    if let Ok(r) = writer.get_mut().write_all(line.as_slice()) {
-                        r
-                    }
+                    // we ignore the result of the call as we can't handle an error here
+                    drop(writer.get_mut().write_all(line.as_slice()));
                 }
             }
         }
@@ -115,9 +114,8 @@ impl<W: Write + Send> Log for Logger<W> {
 
     fn flush(&self) {
         if let Ok(mut writer) = self.writer.lock() {
-            if let Ok(r) = writer.get_mut().flush() {
-                r
-            }
+            // we ignore the result of the call as we can't handle an error here
+            drop(writer.get_mut().flush());
         }
     }
 }

@@ -30,16 +30,15 @@
 //!
 //! let service = Service::new("https://mqs.example.com:7843");
 //!
-//! let mut rt = Builder::new().enable_all().threaded_scheduler().build().unwrap();
+//! let mut rt = Builder::new_multi_thread().enable_all().build().unwrap();
 //! let success = rt.block_on(async { service.check_health().await });
 //! assert!(!success.is_ok());
 //! ```
 
 use hyper::{
-    client::HttpConnector,
+    client::{Client, HttpConnector},
     header::{HeaderName, HeaderValue, CONNECTION, CONTENT_ENCODING, CONTENT_TYPE},
     Body,
-    Client,
     HeaderMap,
     Method,
     Request,
@@ -777,7 +776,7 @@ impl Service {
     ///
     /// let service = Service::new("https://mqs.example.com:7843");
     ///
-    /// let mut rt = Builder::new().enable_all().threaded_scheduler().build().unwrap();
+    /// let mut rt = Builder::new_multi_thread().enable_all().build().unwrap();
     /// let success = rt.block_on(async { service.check_health().await });
     /// assert!(!success.is_ok());
     /// ```
@@ -795,7 +794,7 @@ impl Service {
             200 => Ok(read_body(response.body_mut(), self.max_body_size).await?),
             status => Err(ClientError::ServiceError(status)),
         }?;
-        if let Some(body) = body {
+        body.map_or(Err(ClientError::TooLargeResponse), |body| {
             if body.as_slice().eq(b"green") {
                 Ok(true)
             } else if body.as_slice().eq(b"red") {
@@ -803,9 +802,7 @@ impl Service {
             } else {
                 Err(ClientError::HealthCheckError)
             }
-        } else {
-            Err(ClientError::TooLargeResponse)
-        }
+        })
     }
 }
 
@@ -862,8 +859,8 @@ mod test {
     #[test]
     fn test_errors() {
         // let invalid_method = Method::from_bytes(&[]).unwrap_err();
-        let client = hyper::Client::new();
-        let mut rt = make_runtime();
+        let client = hyper::client::Client::new();
+        let rt = make_runtime();
         let hyper_error = rt.block_on(async {
             client
                 .get("http://localhost:60000/non-existent".parse().unwrap())

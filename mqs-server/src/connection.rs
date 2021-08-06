@@ -9,8 +9,11 @@ use r2d2::{
     PooledConnection,
 };
 use r2d2_diesel::ConnectionManager;
-use serde::export::{fmt::Display, Formatter};
-use std::{env, time::Duration};
+use std::{
+    env,
+    fmt::{Display, Formatter},
+    time::Duration,
+};
 
 /// Type alias for our database connection pool type.
 pub type Pool = r2d2::Pool<ConnectionManager<PgConnection>>;

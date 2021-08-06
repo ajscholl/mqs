@@ -63,7 +63,7 @@ pub async fn with_trace_id<F: Future + Send>(id: Uuid, f: F) -> F::Output {
     TRACE_ID.scope(id, f).await
 }
 
-/// Extract a trace id from a request. If the 'X-TRACE-ID` header is set, we accept the trace id
+/// Extract a trace id from a request. If the `X-TRACE-ID` header is set, we accept the trace id
 /// of the request. Otherwise we generatea fresh one.
 ///
 /// ```
@@ -97,7 +97,7 @@ mod test {
 
     #[test]
     fn get_in_task() {
-        let mut rt = make_runtime();
+        let rt = make_runtime();
         rt.block_on(async {
             let id = Uuid::new_v4();
             assert_eq!(get_trace_id(), None);

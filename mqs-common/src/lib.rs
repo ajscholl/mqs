@@ -1,4 +1,4 @@
-#![feature(unboxed_closures, fn_traits, in_band_lifetimes)]
+#![feature(unboxed_closures, fn_traits)]
 #![warn(
     missing_docs,
     rust_2018_idioms,
@@ -21,12 +21,7 @@ extern crate serde_derive;
 #[macro_use]
 extern crate tokio;
 
-use hyper::{
-    body::{Buf, HttpBody},
-    header::HeaderName,
-    Body,
-    HeaderMap,
-};
+use hyper::{body::HttpBody, header::HeaderName, Body, HeaderMap};
 use uuid::Uuid;
 
 /// Logging utils for mqs applications.
@@ -285,7 +280,7 @@ pub struct QueuesResponse {
 /// # Errors
 ///
 /// If reading any chunk returns an error.
-pub async fn read_body(body: &mut Body, max_size: Option<usize>) -> Result<Option<Vec<u8>>, hyper::error::Error> {
+pub async fn read_body(body: &mut Body, max_size: Option<usize>) -> Result<Option<Vec<u8>>, hyper::Error> {
     let mut chunks = Vec::new();
     let mut total_length = 0;
 
@@ -303,7 +298,7 @@ pub async fn read_body(body: &mut Body, max_size: Option<usize>) -> Result<Optio
     let mut result = Vec::with_capacity(total_length);
 
     for chunk in chunks {
-        result.extend_from_slice(chunk.bytes());
+        result.extend_from_slice(chunk.as_ref());
     }
 
     Ok(Some(result))
@@ -341,7 +336,7 @@ pub mod test {
     /// ```
     #[must_use]
     pub fn make_runtime() -> Runtime {
-        Builder::new().enable_all().basic_scheduler().build().unwrap()
+        Builder::new_current_thread().enable_all().build().unwrap()
     }
 
     /// Read some body returned in a test. The body is read synchronously, so don't use this

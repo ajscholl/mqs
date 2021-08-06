@@ -36,7 +36,7 @@ fn main() {
     dotenv().ok();
     configure_logger(&*LOGGER);
 
-    let mut rt = Builder::new().enable_all().threaded_scheduler().build().unwrap();
+    let rt = Builder::new_multi_thread().enable_all().build().unwrap();
 
     rt.block_on(async {
         loop {
@@ -56,5 +56,5 @@ fn main() {
                 },
             }
         }
-    })
+    });
 }

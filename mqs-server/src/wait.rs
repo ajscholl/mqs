@@ -123,7 +123,7 @@ pub mod test {
     use chrono::Utc;
     use mqs_common::test::make_runtime;
     use std::time::Duration;
-    use tokio::time::delay_for;
+    use tokio::time::sleep;
 
     fn get_queue() -> Queue {
         Queue {
@@ -142,7 +142,7 @@ pub mod test {
 
     #[test]
     fn wait_no_signal() {
-        let mut rt = make_runtime();
+        let rt = make_runtime();
         let wait_queue = MessageWaitQueue::new();
         let signaled = rt.block_on(async { wait_queue.wait(&get_queue(), 1).await });
         assert!(!signaled);
@@ -150,7 +150,7 @@ pub mod test {
 
     #[test]
     fn wait_no_signal_after_signal() {
-        let mut rt = make_runtime();
+        let rt = make_runtime();
         let wait_queue = MessageWaitQueue::new();
         let signaled = rt.block_on(async {
             wait_queue.signal(&get_queue()).await;
@@ -161,10 +161,10 @@ pub mod test {
 
     #[test]
     fn wait_signal() {
-        let mut rt = make_runtime();
+        let rt = make_runtime();
         static WAIT_QUEUE: Lazy<MessageWaitQueue> = Lazy::new(MessageWaitQueue::new);
         rt.spawn(async {
-            delay_for(Duration::from_secs(2)).await;
+            sleep(Duration::from_secs(2)).await;
             WAIT_QUEUE.signal(&get_queue()).await;
         });
         let signaled = rt.block_on(async { WAIT_QUEUE.wait(&get_queue(), 5).await });

@@ -9,11 +9,11 @@ stages:
 - publish
 
 variables:
-  # 1.43.0, but we still need the nightly channel for most of our cargo fmt options
-  RUST_VERSION: nightly-2020-04-20
+  # 1.56.0, but we still need the nightly channel for most of our cargo fmt options
+  RUST_VERSION: nightly-2021-08-05
 
 test:
-  image: rust:1.34.0-stretch
+  image: rust:1.54.0-buster
   stage: compile
   script:
      - export CARGO_HOME="$(pwd)/usr/local/cargo"
@@ -28,7 +28,7 @@ test:
      - find . -name "*.rs" -exec touch {} \;
      - cargo check --locked -Z unstable-options
      - find . -name "*.rs" -exec touch {} \;
-     - cargo clippy -Z unstable-options -- -D clippy::all -D clippy::pedantic -A clippy::used-underscore-binding -D clippy::nursery -A clippy::module_name_repetitions
+     - cargo clippy -Z unstable-options -- -D clippy::all -D clippy::pedantic -D clippy::nursery -W clippy::module_name_repetitions -A clippy::missing-errors-doc -A clippy::missing-panics-doc -A clippy::missing-const-for-fn
   cache:
     key: test
     paths:
@@ -36,7 +36,7 @@ test:
       - usr/local
 
 audit:
-  image: rust:1.34.0-stretch
+  image: rust:1.54.0-buster
   stage: compile
   before_script:
     - mkdir -p "$(pwd)/usr/local/cargo" "$(pwd)/usr/local/rustup"
@@ -59,7 +59,7 @@ audit:
       - usr/local
 
 coverage:
-  image: rust:1.34.0-stretch
+  image: rust:1.54.0-buster
   stage: compile
   before_script:
     - mkdir -p "$(pwd)/usr/local/cargo" "$(pwd)/usr/local/rustup"
@@ -70,8 +70,7 @@ coverage:
      - export RUSTUP_HOME=/usr/local/rustup
      - export PATH="$CARGO_HOME/bin:$RUSTUP_HOME/bin:$PATH"
      - rustup default "$RUST_VERSION"
-     - rustup toolchain install nightly
-     - cargo install cargo-tarpaulin --version "=0.12.3"
+     - cargo install cargo-tarpaulin --version "=0.18.0"
      - cargo tarpaulin --locked --line --out Html --workspace --verbose
   after_script:
     - mv /usr/local/cargo "$(pwd)/usr/local/cargo"
@@ -88,7 +87,7 @@ coverage:
       - usr/local
 
 compile:
-  image: rust:1.34.0-stretch
+  image: rust:1.54.0-buster
   stage: compile
   script:
      - export CARGO_HOME="$(pwd)/usr/local/cargo"

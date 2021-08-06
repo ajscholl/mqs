@@ -6,8 +6,8 @@ use diesel::{
     query_builder::{AstPass, QueryFragment},
     result::{DatabaseErrorKind, Error},
 };
-use sha2::{digest::Input, Digest, Sha256};
-use std::ops::{Add, Deref};
+use sha2::{Digest, Sha256};
+use std::ops::Add;
 use uuid::Uuid;
 
 use crate::{
@@ -74,8 +74,8 @@ impl MessageRepository for PgRepository {
         let id = Uuid::new_v4();
         let hash = if queue.content_based_deduplication {
             let mut digest = Sha256::default();
-            Input::input(&mut digest, input.payload);
-            let result = digest.result();
+            digest.update(input.payload);
+            let result = digest.finalize();
             Some(base64::encode(result.as_slice()))
         } else {
             None
@@ -93,7 +93,7 @@ impl MessageRepository for PgRepository {
                 created_at: now.naive_utc(),
                 trace_id: input.trace_id,
             })
-            .execute(self.conn.deref());
+            .execute(&*self.conn);
         match result {
             Ok(_) => Ok(true),
             Err(Error::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => Ok(false),
@@ -116,7 +116,7 @@ impl MessageRepository for PgRepository {
             ))
             .returning(messages::all_columns);
 
-        let messages: Vec<Message> = update_query.get_results(self.conn.deref())?;
+        let messages: Vec<Message> = update_query.get_results(&*self.conn)?;
 
         // filter result, move messages to dead letter queues
         let mut result = Vec::with_capacity(messages.len());
@@ -156,17 +156,17 @@ impl MessageRepository for PgRepository {
         diesel::dsl::update(messages::table)
             .set((messages::queue.eq(new_queue), messages::receives.eq(0)))
             .filter(messages::id.eq_any(ids))
-            .execute(self.conn.deref())
+            .execute(&*self.conn)
     }
 
     fn delete_message_by_id(&self, id: Uuid) -> QueryResult<bool> {
         diesel::delete(messages::table.filter(messages::id.eq(id)))
-            .execute(self.conn.deref())
+            .execute(&*self.conn)
             .map(|count| count > 0)
     }
 
     fn delete_messages_by_ids(&self, ids: Vec<Uuid>) -> QueryResult<usize> {
-        diesel::delete(messages::table.filter(messages::id.eq_any(ids))).execute(self.conn.deref())
+        diesel::delete(messages::table.filter(messages::id.eq_any(ids))).execute(&*self.conn)
     }
 }
 

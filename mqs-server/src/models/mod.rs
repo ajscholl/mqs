@@ -29,12 +29,12 @@ pub(crate) mod test {
     };
     use chrono::Utc;
     use diesel::QueryResult;
-    use serde::{de::StdError, export::Formatter};
-    use sha2::{digest::Input, Digest, Sha256};
+    use serde::de::StdError;
+    use sha2::{Digest, Sha256};
     use std::{
         cell::Cell,
         collections::HashMap,
-        fmt::Display,
+        fmt::{Display, Formatter},
         ops::{Deref, Sub},
         sync::{Arc, Mutex},
     };
@@ -117,8 +117,8 @@ pub(crate) mod test {
             let mut found = false;
             let hash = if queue.content_based_deduplication {
                 let mut digest = Sha256::default();
-                Input::input(&mut digest, input.payload);
-                let result = base64::encode(digest.result().as_slice());
+                digest.update(input.payload);
+                let result = base64::encode(digest.finalize().as_slice());
                 self.with_messages(|messages| {
                     for message in messages.values() {
                         if let Some(msg_hash) = &message.hash {
