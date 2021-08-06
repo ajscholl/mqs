@@ -21,11 +21,18 @@ use std::{
     fmt::{Display, Formatter},
     ops::Sub,
 };
-use tokio::runtime::Builder;
+use tokio::{runtime::Builder, time::sleep};
 use uuid::Uuid;
 
 use mqs_client::{ClientError, PublishableMessage, Service};
 use mqs_common::QueueConfig;
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 
 type AnyError = Box<dyn Error + Send + Sync>;
 
@@ -189,7 +196,12 @@ async fn consume_test_messages(queue_count: usize) -> Result<(), AnyError> {
     for i in 0..queue_count {
         let queue = format!("test-queue-{}", i);
         let queue_copy = queue.clone();
-        let handle = tokio::spawn(async move { consume_messages(i, queue_copy, None).await.unwrap() });
+        let publish_done = Arc::new(AtomicBool::new(true));
+        let handle = tokio::spawn(async move {
+            consume_messages(i, queue_copy, None, NUM_THREADS, publish_done.clone())
+                .await
+                .unwrap();
+        });
         pending.push((queue, handle));
     }
 
@@ -208,9 +220,18 @@ async fn publish_and_consume_test_messages(queue_count: usize) -> Result<(), Any
     for i in 0..queue_count {
         let queue = format!("test-queue-{}", i);
         let queue_copy = queue.clone();
-        let handle_publish = tokio::spawn(async move { publish_messages(i, queue_copy).await.unwrap() });
+        let publish_done = Arc::new(AtomicBool::new(false));
+        let publisher_done = publish_done.clone();
+        let handle_publish = tokio::spawn(async move {
+            publish_messages(i, queue_copy).await.unwrap();
+            publisher_done.store(true, Ordering::Relaxed);
+        });
         let queue_copy = queue.clone();
-        let handle_consume = tokio::spawn(async move { consume_messages(i, queue_copy, Some(10)).await.unwrap() });
+        let handle_consume = tokio::spawn(async move {
+            consume_messages(i, queue_copy, Some(10), 1, publish_done.clone())
+                .await
+                .unwrap();
+        });
         pending.push((queue, handle_publish, handle_consume));
     }
 
@@ -262,72 +283,105 @@ async fn publish_messages(index: usize, queue: String) -> Result<(), AnyError> {
             message:          message.clone(),
         });
     }
+    let mut published_messages = 0;
     for _ in 0..10000 / message_bundle.len() {
         let result = s.publish_messages(&queue, &message_bundle).await?;
         if !result {
             return Err(StringError::new("Expected successful publish").into());
         }
+        published_messages += message_bundle.len();
     }
+
+    println!("Published {} messages to queue {}", published_messages, &queue);
 
     Ok(())
 }
 
-async fn consume_messages(index: usize, queue: String, timeout: Option<u16>) -> Result<(), AnyError> {
-    let mut handles = Vec::with_capacity(NUM_THREADS);
+async fn consume_messages(
+    index: usize,
+    queue: String,
+    timeout: Option<u16>,
+    workers: usize,
+    publish_done: Arc<AtomicBool>,
+) -> Result<(), AnyError> {
+    let mut handles = Vec::with_capacity(workers);
     for _ in 0..handles.capacity() {
         let queue_name = queue.clone();
-        let handle = tokio::spawn(async move {
-            let s = get_service();
-            loop {
-                let messages = s.get_messages(&queue_name, 10, timeout).await?;
-                if messages.is_empty() {
-                    break;
-                }
-                for message in messages {
-                    if message.content_type != DEFAULT_MESSAGE_CONTENT_TYPE[index % DEFAULT_MESSAGE_CONTENT_TYPE.len()]
-                    {
-                        return Err(StringError::new("Message content type does not match").into());
-                    }
-                    match DEFAULT_MESSAGE_CONTENT_ENCODING[index % DEFAULT_MESSAGE_CONTENT_ENCODING.len()] {
-                        None => {
-                            if message.content_encoding.is_some() {
-                                return Err(StringError::new("Unexpected message content encoding").into());
-                            }
-                        },
-                        Some(encoding) => {
-                            if message.content_encoding.is_none() {
-                                return Err(StringError::new("Message content encoding missing").into());
-                            }
-                            if message.content_encoding.unwrap().as_str() != encoding {
-                                return Err(StringError::new("Message content encoding does not match").into());
-                            }
-                        },
-                    }
-                    if message.trace_id != DEFAULT_TRACE_ID[index % DEFAULT_TRACE_ID.len()] {
-                        return Err(StringError::new("Message trace id does not match").into());
-                    }
-                    if message.message_receives != 1 {
-                        return Err(StringError::new("Message was received wrong number of times").into());
-                    }
-                    if message.content.as_slice() != DEFAULT_MESSAGE[index % DEFAULT_MESSAGE.len()] {
-                        return Err(StringError::new("Message content does not match").into());
-                    }
-                    let deleted = s.delete_message(None, &message.message_id).await?;
-
-                    if !deleted {
-                        return Err(StringError::new("Failed to delete message").into());
-                    }
-                }
-            }
-
-            Ok::<(), AnyError>(())
-        });
+        let publisher_done = publish_done.clone();
+        let handle = tokio::spawn(async move { consume_worker(index, timeout, publisher_done, queue_name).await });
         handles.push(handle);
     }
 
+    let mut consumed_messages = 0;
+    let mut min_consumed = i32::MAX;
+    let mut max_consumed = 0;
     for handle in handles {
-        handle.await??;
+        let consumed = handle.await??;
+        consumed_messages += consumed;
+        min_consumed = min_consumed.min(consumed);
+        max_consumed = max_consumed.max(consumed);
     }
 
+    println!(
+        "Consumed {} messages (between {} and {} / worker) with {} workers in total from queue {}",
+        consumed_messages, min_consumed, max_consumed, workers, &queue
+    );
+
     Ok(())
+}
+
+async fn consume_worker(
+    index: usize,
+    timeout: Option<u16>,
+    publish_done: Arc<AtomicBool>,
+    queue_name: String,
+) -> Result<i32, AnyError> {
+    let s = get_service();
+    let mut consumed_messages = 0;
+    loop {
+        let messages = s.get_messages(&queue_name, 10, timeout).await?;
+        if messages.is_empty() {
+            if publish_done.load(Ordering::Relaxed) {
+                break;
+            }
+            sleep(Duration::from_millis(500)).await;
+        }
+        for message in messages {
+            consumed_messages += 1;
+            if message.content_type != DEFAULT_MESSAGE_CONTENT_TYPE[index % DEFAULT_MESSAGE_CONTENT_TYPE.len()] {
+                return Err(StringError::new("Message content type does not match").into());
+            }
+            match DEFAULT_MESSAGE_CONTENT_ENCODING[index % DEFAULT_MESSAGE_CONTENT_ENCODING.len()] {
+                None => {
+                    if message.content_encoding.is_some() {
+                        return Err(StringError::new("Unexpected message content encoding").into());
+                    }
+                },
+                Some(encoding) => {
+                    if message.content_encoding.is_none() {
+                        return Err(StringError::new("Message content encoding missing").into());
+                    }
+                    if message.content_encoding.unwrap().as_str() != encoding {
+                        return Err(StringError::new("Message content encoding does not match").into());
+                    }
+                },
+            }
+            if message.trace_id != DEFAULT_TRACE_ID[index % DEFAULT_TRACE_ID.len()] {
+                return Err(StringError::new("Message trace id does not match").into());
+            }
+            if message.message_receives != 1 {
+                return Err(StringError::new("Message was received wrong number of times").into());
+            }
+            if message.content.as_slice() != DEFAULT_MESSAGE[index % DEFAULT_MESSAGE.len()] {
+                return Err(StringError::new("Message content does not match").into());
+            }
+            let deleted = s.delete_message(None, &message.message_id).await?;
+
+            if !deleted {
+                return Err(StringError::new("Failed to delete message").into());
+            }
+        }
+    }
+
+    Ok::<i32, AnyError>(consumed_messages)
 }
