@@ -3,10 +3,19 @@ use hyper::{
     Body,
     HeaderMap,
 };
-use mqs_common::{multipart, MessageIdHeader, MessageReceivesHeader, Status, TraceIdHeader};
+use mqs_common::{
+    multipart,
+    MessageIdHeader,
+    MessageReceivesHeader,
+    PublishedAtHeader,
+    Status,
+    TraceIdHeader,
+    VisibleAtHeader,
+};
 use serde::Serialize;
 
 use crate::models::message::Message;
+use chrono::{DateTime, SecondsFormat, Utc};
 
 pub mod messages;
 pub mod queues;
@@ -118,6 +127,16 @@ impl MqsResponse {
         if let Ok(value) = HeaderValue::from_str(&format!("{}", message.receives)) {
             headers.insert(MessageReceivesHeader::name(), value);
         }
+        if let Ok(value) = HeaderValue::from_str(
+            &DateTime::<Utc>::from_utc(message.created_at, Utc).to_rfc3339_opts(SecondsFormat::Secs, true),
+        ) {
+            headers.insert(PublishedAtHeader::name(), value);
+        }
+        if let Ok(value) = HeaderValue::from_str(
+            &DateTime::<Utc>::from_utc(message.visible_since, Utc).to_rfc3339_opts(SecondsFormat::Secs, true),
+        ) {
+            headers.insert(VisibleAtHeader::name(), value);
+        }
     }
 }
 
@@ -207,7 +226,7 @@ pub(crate) mod test {
     fn message_response_single_with_encoding(encoding: Option<String>) {
         let mut response = MqsResponse::messages(vec![mk_message(0, encoding.clone())]).into_response();
         assert_eq!(response.status().as_u16(), Status::Ok as u16);
-        assert_eq!(response.headers().len(), if encoding.is_some() { 4 } else { 3 });
+        assert_eq!(response.headers().len(), if encoding.is_some() { 6 } else { 5 });
         let ct = response.headers().get(CONTENT_TYPE).unwrap().to_str().unwrap();
         let message_id = MessageIdHeader::get(response.headers());
         assert_eq!(ct, "text/plain");
@@ -230,12 +249,12 @@ pub(crate) mod test {
     }
 
     fn message_response_multiple_with_encoding(encoding: Option<String>) {
-        let mut response = MqsResponse::messages(vec![
+        let messages = vec![
             mk_message(0, encoding.clone()),
             mk_message(1, encoding.clone()),
             mk_message(2, encoding.clone()),
-        ])
-        .into_response();
+        ];
+        let mut response = MqsResponse::messages(messages.clone()).into_response();
         assert_eq!(response.status().as_u16(), Status::Ok as u16);
         assert_eq!(response.headers().len(), 1);
         let ct = response.headers().get(CONTENT_TYPE).unwrap().to_str().unwrap();
@@ -248,18 +267,24 @@ pub(crate) mod test {
             assert_eq!(
                 read_body(response.body_mut()).as_slice(),
                 format!(
-                    "{}\r\ncontent-type: text/plain\r\n{}x-mqs-message-id: {}\r\nx-mqs-message-receives: 1\r\n\r\nABC\r\n\
-                    {}\r\ncontent-type: text/plain\r\n{}x-mqs-message-id: {}\r\nx-mqs-message-receives: 2\r\n\r\nABC\r\n\
-                    {}\r\ncontent-type: text/plain\r\n{}x-mqs-message-id: {}\r\nx-mqs-message-receives: 3\r\n\r\nABC\r\n{}--",
+                    "{}\r\ncontent-type: text/plain\r\n{}x-mqs-message-id: {}\r\nx-mqs-message-receives: 1\r\nx-mqs-message-published-at: {}\r\nx-mqs-message-visible-at: {}\r\n\r\nABC\r\n\
+                    {}\r\ncontent-type: text/plain\r\n{}x-mqs-message-id: {}\r\nx-mqs-message-receives: 2\r\nx-mqs-message-published-at: {}\r\nx-mqs-message-visible-at: {}\r\n\r\nABC\r\n\
+                    {}\r\ncontent-type: text/plain\r\n{}x-mqs-message-id: {}\r\nx-mqs-message-receives: 3\r\nx-mqs-message-published-at: {}\r\nx-mqs-message-visible-at: {}\r\n\r\nABC\r\n{}--",
                     boundary,
                     encoding_header,
                     "0a141e28-0b15-1f29-0c16-202b0e18222c",
+                    DateTime::<Utc>::from_utc(messages[0].created_at, Utc).to_rfc3339_opts(SecondsFormat::Secs, true),
+                    DateTime::<Utc>::from_utc(messages[0].visible_since, Utc).to_rfc3339_opts(SecondsFormat::Secs, true),
                     boundary,
                     encoding_header,
                     "0b141e28-0b15-1f29-0c16-202b0e18222c",
+                    DateTime::<Utc>::from_utc(messages[1].created_at, Utc).to_rfc3339_opts(SecondsFormat::Secs, true),
+                    DateTime::<Utc>::from_utc(messages[1].visible_since, Utc).to_rfc3339_opts(SecondsFormat::Secs, true),
                     boundary,
                     encoding_header,
                     "0c141e28-0b15-1f29-0c16-202b0e18222c",
+                    DateTime::<Utc>::from_utc(messages[2].created_at, Utc).to_rfc3339_opts(SecondsFormat::Secs, true),
+                    DateTime::<Utc>::from_utc(messages[2].visible_since, Utc).to_rfc3339_opts(SecondsFormat::Secs, true),
                     boundary
                 )
                 .as_bytes(),

@@ -35,6 +35,7 @@
 //! assert!(!success.is_ok());
 //! ```
 
+use chrono::{DateTime, Utc};
 use hyper::{
     client::{Client, HttpConnector},
     header::{HeaderName, HeaderValue, CONNECTION, CONTENT_ENCODING, CONTENT_TYPE},
@@ -50,11 +51,13 @@ use mqs_common::{
     read_body,
     MessageIdHeader,
     MessageReceivesHeader,
+    PublishedAtHeader,
     QueueConfig,
     QueueDescriptionOutput,
     QueuesResponse,
     Status::ServiceUnavailable,
     TraceIdHeader,
+    VisibleAtHeader,
     DEFAULT_CONTENT_TYPE,
 };
 use serde::{de::DeserializeOwned, Serialize};
@@ -188,6 +191,10 @@ pub struct MessageResponse {
     pub content_encoding: Option<String>,
     /// Number of times this message was already received.
     pub message_receives: i32,
+    /// Timestamp of the message being published.
+    pub published_at:     DateTime<Utc>,
+    /// Timestamp of the next time the message will be visible again.
+    pub visible_at:       DateTime<Utc>,
     /// Trace id of the message.
     pub trace_id:         Option<Uuid>,
     /// Encoded body of the message.
@@ -541,6 +548,8 @@ impl Service {
             .get(CONTENT_ENCODING)
             .map_or_else(|| None, |h| h.to_str().map_or_else(|_| None, |s| Some(s.to_string())));
         let message_receives = MessageReceivesHeader::get(headers);
+        let published_at = PublishedAtHeader::get(headers);
+        let visible_at = VisibleAtHeader::get(headers);
         let trace_id = TraceIdHeader::get(headers);
         let content = get_body()?;
         Ok(MessageResponse {
@@ -548,6 +557,8 @@ impl Service {
             content_type,
             content_encoding,
             message_receives,
+            published_at,
+            visible_at,
             trace_id,
             content,
         })

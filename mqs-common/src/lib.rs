@@ -32,6 +32,7 @@ pub mod multipart;
 pub mod router;
 mod status;
 
+use chrono::{DateTime, NaiveDateTime, Utc};
 pub use status::*;
 
 /// Content type used if the client does not specify one.
@@ -112,6 +113,144 @@ impl MessageReceivesHeader {
     #[must_use]
     pub fn get(headers: &HeaderMap) -> i32 {
         get_header(headers, Self::name()).map_or_else(|| 0, |s| s.parse().unwrap_or(0))
+    }
+}
+
+/// Header containing the time the message was published at.
+#[derive(Clone, Copy)]
+pub struct PublishedAtHeader {}
+
+impl PublishedAtHeader {
+    /// Get the name of the header containing the time the message was published at.
+    ///
+    /// ```
+    /// use hyper::header::HeaderName;
+    /// use mqs_common::PublishedAtHeader;
+    ///
+    /// assert_eq!(
+    ///     HeaderName::from_static("x-mqs-message-published-at"),
+    ///     PublishedAtHeader::name()
+    /// );
+    /// ```
+    #[must_use]
+    pub fn name() -> HeaderName {
+        HeaderName::from_static("x-mqs-message-published-at")
+    }
+
+    /// Get the time a message was originally published at.
+    /// Returns 1970-01-01T00:00:00Z in case the header is missing or contains an invalid value.
+    ///
+    /// ```
+    /// use chrono::{DateTime, NaiveDateTime, Utc};
+    /// use http::HeaderValue;
+    /// use hyper::HeaderMap;
+    /// use mqs_common::PublishedAtHeader;
+    ///
+    /// let mut headers = HeaderMap::new();
+    /// assert_eq!(PublishedAtHeader::get(&headers), PublishedAtHeader::default());
+    /// headers.insert(
+    ///     PublishedAtHeader::name(),
+    ///     HeaderValue::from_static("today is not a valid date"),
+    /// );
+    /// assert_eq!(PublishedAtHeader::get(&headers), PublishedAtHeader::default());
+    /// headers.insert(
+    ///     PublishedAtHeader::name(),
+    ///     HeaderValue::from_static("1984-04-04T00:00:00Z"),
+    /// );
+    /// let expected = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(449884800, 0), Utc);
+    /// assert_eq!(PublishedAtHeader::get(&headers), expected);
+    /// ```
+    #[must_use]
+    pub fn get(headers: &HeaderMap) -> DateTime<Utc> {
+        get_header(headers, Self::name()).map_or_else(Self::default, |s| {
+            DateTime::parse_from_rfc3339(s).map_or_else(|_| Self::default(), |t| t.with_timezone(&Utc))
+        })
+    }
+
+    /// The default value if we can't find or parse the header.
+    /// Returns the unix epoch at 1970-01-01T00:00:00Z.
+    ///
+    /// ```
+    /// use chrono::SecondsFormat;
+    /// use mqs_common::PublishedAtHeader;
+    ///
+    /// assert_eq!(
+    ///     "1970-01-01T00:00:00Z",
+    ///     PublishedAtHeader::default().to_rfc3339_opts(SecondsFormat::Secs, true)
+    /// );
+    /// ```
+    #[must_use]
+    pub fn default() -> DateTime<Utc> {
+        DateTime::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc)
+    }
+}
+
+/// Header containing the time the message got visible again.
+#[derive(Clone, Copy)]
+pub struct VisibleAtHeader {}
+
+impl VisibleAtHeader {
+    /// Get the name of the header containing the time the message got visible again.
+    ///
+    /// ```
+    /// use hyper::header::HeaderName;
+    /// use mqs_common::VisibleAtHeader;
+    ///
+    /// assert_eq!(
+    ///     HeaderName::from_static("x-mqs-message-visible-at"),
+    ///     VisibleAtHeader::name()
+    /// );
+    /// ```
+    #[must_use]
+    pub fn name() -> HeaderName {
+        HeaderName::from_static("x-mqs-message-visible-at")
+    }
+
+    /// Get the time a message got visible again.
+    /// Returns 1970-01-01T00:00:00Z in case the header is missing or contains an invalid value.
+    ///
+    /// ```
+    /// use chrono::{DateTime, NaiveDateTime, Utc};
+    /// use http::HeaderValue;
+    /// use hyper::HeaderMap;
+    /// use mqs_common::VisibleAtHeader;
+    ///
+    /// let mut headers = HeaderMap::new();
+    /// assert_eq!(VisibleAtHeader::get(&headers), VisibleAtHeader::default());
+    /// headers.insert(
+    ///     VisibleAtHeader::name(),
+    ///     HeaderValue::from_static("today is not a valid date"),
+    /// );
+    /// assert_eq!(VisibleAtHeader::get(&headers), VisibleAtHeader::default());
+    /// headers.insert(
+    ///     VisibleAtHeader::name(),
+    ///     HeaderValue::from_static("1984-04-04T00:00:00Z"),
+    /// );
+    /// let expected = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(449884800, 0), Utc);
+    /// assert_eq!(VisibleAtHeader::get(&headers), expected);
+    /// ```
+    #[must_use]
+    pub fn get(headers: &HeaderMap) -> DateTime<Utc> {
+        get_header(headers, Self::name()).map_or_else(Self::default, |s| {
+            DateTime::parse_from_rfc3339(s).map_or_else(|_| Self::default(), |t| t.with_timezone(&Utc))
+        })
+    }
+
+    /// The default value if we can't find or parse the header.
+    /// Returns the unix epoch at 1970-01-01T00:00:00Z.
+    ///
+    /// ```
+    /// use chrono::SecondsFormat;
+    /// use mqs_common::VisibleAtHeader;
+    ///
+    /// assert_eq!(
+    ///     "1970-01-01T00:00:00Z",
+    ///     VisibleAtHeader::default().to_rfc3339_opts(SecondsFormat::Secs, true)
+    /// );
+    /// ```
+    #[must_use]
+    pub fn default() -> DateTime<Utc> {
+        DateTime::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc)
     }
 }
 

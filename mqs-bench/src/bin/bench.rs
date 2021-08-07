@@ -14,25 +14,24 @@
 //! Benchmark application which creates a lot of messages and consumes them again against a MQS server.
 //! Used in CI tests.
 
-use chrono::Utc;
+use cached::once_cell::sync::Lazy;
+use chrono::{DateTime, Utc};
 use std::{
     env,
     error::Error,
     fmt::{Display, Formatter},
     ops::Sub,
-};
-use tokio::{runtime::Builder, time::sleep};
-use uuid::Uuid;
-
-use mqs_client::{ClientError, PublishableMessage, Service};
-use mqs_common::QueueConfig;
-use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
     time::Duration,
 };
+use tokio::{runtime::Builder, time::sleep};
+use uuid::Uuid;
+
+use mqs_client::{ClientError, PublishableMessage, Service};
+use mqs_common::QueueConfig;
 
 type AnyError = Box<dyn Error + Send + Sync>;
 
@@ -63,6 +62,8 @@ fn get_service() -> Service {
 }
 
 fn main() -> Result<(), AnyError> {
+    // initialize the start timestamp
+    let _ = *START;
     let rt = Builder::new_multi_thread()
         .enable_all()
         .worker_threads(NUM_THREADS)
@@ -271,6 +272,10 @@ const DEFAULT_TRACE_ID: [Option<Uuid>; 3] = [
 const DEFAULT_MESSAGE_CONTENT_TYPE: [&str; 3] = ["application/json", "text/html", "image/png"];
 const DEFAULT_MESSAGE_CONTENT_ENCODING: [Option<&str>; 3] = [Some("identity"), Some("gzip"), None];
 
+// current start minus 1 second (so if we start at 300ms past a full second, truncation in the db
+// will not cause any problems)
+static START: Lazy<DateTime<Utc>> = Lazy::new(|| Utc::now().sub(chrono::Duration::seconds(1)));
+
 async fn publish_messages(index: usize, queue: String) -> Result<(), AnyError> {
     let s = get_service();
     let message = DEFAULT_MESSAGE[index % DEFAULT_MESSAGE.len()].to_owned();
@@ -371,6 +376,12 @@ async fn consume_worker(
             }
             if message.message_receives != 1 {
                 return Err(StringError::new("Message was received wrong number of times").into());
+            }
+            if message.published_at.le(&START) || message.published_at.gt(&Utc::now()) {
+                return Err(StringError::new("Message was published too early or late").into());
+            }
+            if message.visible_at.le(&Utc::now()) {
+                return Err(StringError::new("Message was visible too early").into());
             }
             if message.content.as_slice() != DEFAULT_MESSAGE[index % DEFAULT_MESSAGE.len()] {
                 return Err(StringError::new("Message content does not match").into());
