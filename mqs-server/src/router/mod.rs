@@ -134,23 +134,20 @@ mod test {
             let mut response = run_handler_with(
                 create_handler.clone(),
                 &repo,
-                b"{\"retention_timeout\": 600, \"visibility_timeout\": 30, \"message_delay\": 5, \"message_deduplication\": false}"
-                    .to_vec(),
+                b"{\"retention_timeout\": 600, \"visibility_timeout\": 30, \"message_delay\": 5, \"message_deduplication\": false}".to_vec(),
             );
             assert_eq!(StatusCode::from(Status::Created), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(
                 body,
-                b"{\"name\":\"my-queue\",\"redrive_policy\":null,\"retention_timeout\":600,\"visibility_timeout\":30,\"message_delay\":5,\"message_deduplication\":false}"
-                    .to_vec(),
+                b"{\"name\":\"my-queue\",\"redrive_policy\":null,\"retention_timeout\":600,\"visibility_timeout\":30,\"message_delay\":5,\"message_deduplication\":false}".to_vec(),
             );
         }
         {
             let mut response = run_handler_with(
                 create_handler,
                 &repo,
-                b"{\"retention_timeout\": 600, \"visibility_timeout\": 60, \"message_delay\": 5, \"message_deduplication\": false}"
-                    .to_vec(),
+                b"{\"retention_timeout\": 600, \"visibility_timeout\": 60, \"message_delay\": 5, \"message_deduplication\": false}".to_vec(),
             );
             assert_eq!(StatusCode::from(Status::Conflict), response.status());
             let body = read_body(response.body_mut());
@@ -189,15 +186,13 @@ mod test {
             let mut response = run_handler_with(
                 update_handler,
                 &repo,
-                b"{\"retention_timeout\": 30, \"visibility_timeout\": 10, \"message_delay\": 2, \"message_deduplication\": true}"
-                    .to_vec(),
+                b"{\"retention_timeout\": 30, \"visibility_timeout\": 10, \"message_delay\": 2, \"message_deduplication\": true}".to_vec(),
             );
             assert_eq!(StatusCode::from(Status::Ok), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(
                 body,
-                b"{\"name\":\"my-queue\",\"redrive_policy\":null,\"retention_timeout\":30,\"visibility_timeout\":10,\"message_delay\":2,\"message_deduplication\":true}"
-                    .to_vec(),
+                b"{\"name\":\"my-queue\",\"redrive_policy\":null,\"retention_timeout\":30,\"visibility_timeout\":10,\"message_delay\":2,\"message_deduplication\":true}".to_vec(),
             );
         }
         let delete_handler = router.route(&Method::DELETE, vec!["queues", "my-queue"].into_iter());
@@ -209,8 +204,7 @@ mod test {
             let body = read_body(response.body_mut());
             assert_eq!(
                 body,
-                b"{\"name\":\"my-queue\",\"redrive_policy\":null,\"retention_timeout\":30,\"visibility_timeout\":10,\"message_delay\":2,\"message_deduplication\":true}"
-                    .to_vec(),
+                b"{\"name\":\"my-queue\",\"redrive_policy\":null,\"retention_timeout\":30,\"visibility_timeout\":10,\"message_delay\":2,\"message_deduplication\":true}".to_vec(),
             );
         }
         {

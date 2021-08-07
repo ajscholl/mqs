@@ -76,6 +76,7 @@ pub struct Queue {
 }
 
 impl Queue {
+    #[allow(clippy::missing_const_for_fn)]
     pub(crate) fn into_config_output(self) -> QueueConfigOutput {
         QueueConfigOutput {
             name:                  self.name,
@@ -116,8 +117,8 @@ pub fn pg_interval(mut seconds: i64) -> PgInterval {
 
     PgInterval {
         microseconds: seconds * 1_000_000,
-        days:         i32::try_from(days).unwrap_or_else(|_| i32::max_value()),
-        months:       i32::try_from(months).unwrap_or_else(|_| i32::max_value()),
+        days:         i32::try_from(days).unwrap_or(i32::MAX),
+        months:       i32::try_from(months).unwrap_or(i32::MAX),
     }
 }
 

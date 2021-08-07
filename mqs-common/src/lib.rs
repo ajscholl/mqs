@@ -189,7 +189,7 @@ pub fn get_header(headers: &HeaderMap, header: HeaderName) -> Option<&str> {
 }
 
 /// Queue configuration send to the server by the client.
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub struct QueueConfig {
     /// Redrive policy of the queue.
     pub redrive_policy:        Option<QueueRedrivePolicy>,
@@ -223,7 +223,7 @@ pub struct QueueDescriptionOutput {
 }
 
 /// Redrive policy of a queue.
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub struct QueueRedrivePolicy {
     /// Number of receives after which a message will be moved to the dead letter queue.
     pub max_receives:      i32,

@@ -2,6 +2,7 @@
 
 members = [
     "mqs-bench",
+    "mqs-cli",
     "mqs-client",
     "mqs-common",
     "mqs-server",

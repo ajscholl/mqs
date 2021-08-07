@@ -1,0 +1,31 @@
+[package]
+name = "mqs-cli"
+version = "0.1.0"
+authors = ["Jonas Scholl <jonas.scholl@lingumatiker.de>"]
+edition = "2018"
+
+[dependencies.mqs-common]
+path = "../mqs-common"
+
+[dependencies.mqs-client]
+path = "../mqs-client"
+
+[dependencies.base64]
+version = "0.13.0"
+
+[dependencies.serde]
+version = "1.0.127"
+
+[dependencies.serde_derive]
+version = "1.0.127"
+
+[dependencies.serde_json]
+version = "1.0.66"
+
+[dependencies.uuid]
+version = "0.8.2"
+features = ["serde", "v4"]
+
+[dependencies.tokio]
+version = "1.9.0"
+features = ["rt", "rt-multi-thread", "sync", "net", "time"]

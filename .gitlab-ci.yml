@@ -28,7 +28,7 @@ test:
      - find . -name "*.rs" -exec touch {} \;
      - cargo check --locked -Z unstable-options
      - find . -name "*.rs" -exec touch {} \;
-     - cargo clippy -Z unstable-options -- -D clippy::all -D clippy::pedantic -D clippy::nursery -W clippy::module_name_repetitions -A clippy::missing-errors-doc -A clippy::missing-panics-doc -A clippy::missing-const-for-fn
+     - cargo clippy -Z unstable-options -- -D clippy::all -D clippy::pedantic -D clippy::nursery -W clippy::module_name_repetitions -A clippy::missing-errors-doc -A clippy::missing-panics-doc
   cache:
     key: test
     paths:
