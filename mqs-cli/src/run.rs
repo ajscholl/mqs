@@ -68,8 +68,8 @@ fn print_messages(messages: Vec<MessageResponse>) {
     }
 }
 
-pub async fn run_command(host: &str, port: u16, cmd: Command) -> i32 {
-    match run_command_for_result(host, port, cmd).await {
+pub async fn run_command(host: &str, port: u16, trace_id: Option<Uuid>, cmd: Command) -> i32 {
+    match run_command_for_result(host, port, trace_id, cmd).await {
         Ok(code) => code,
         Err(err) => {
             print_json(&ErrorStruct {
@@ -81,9 +81,13 @@ pub async fn run_command(host: &str, port: u16, cmd: Command) -> i32 {
     }
 }
 
-async fn run_command_for_result(host: &str, port: u16, cmd: Command) -> Result<i32, ClientError> {
+async fn run_command_for_result(
+    host: &str,
+    port: u16,
+    trace_id: Option<Uuid>,
+    cmd: Command,
+) -> Result<i32, ClientError> {
     let s = Service::new(&format_host(host, port));
-    let trace_id = Some(Uuid::new_v4());
 
     match cmd {
         Command::ListQueues(offset, limit) => {

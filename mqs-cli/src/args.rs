@@ -4,14 +4,16 @@ use std::{
     io::{stdin, Read},
     str::FromStr,
 };
+use uuid::Uuid;
 
+#[derive(Eq, PartialEq, Debug)]
 pub enum ParsedArgs {
     ShowHelp(Option<String>),
     ShowCommandHelp(Option<String>, Command),
-    RunCommand(String, u16, Command),
+    RunCommand(String, u16, Option<Uuid>, Command),
 }
 
-#[derive(Clone)]
+#[derive(Eq, PartialEq, Debug, Clone)]
 pub enum Command {
     ListQueues(Option<usize>, Option<usize>),
     CreateQueue(String, QueueConfig),
@@ -24,7 +26,7 @@ pub enum Command {
     DeleteMessage(String),
 }
 
-#[derive(Clone)]
+#[derive(Eq, PartialEq, Debug, Clone)]
 pub struct OwnedPublishableMessage {
     /// Content type of the message.
     pub(crate) content_type:     String,
@@ -32,6 +34,13 @@ pub struct OwnedPublishableMessage {
     pub(crate) content_encoding: Option<String>,
     /// Encoded body of the message.
     pub(crate) message:          Vec<u8>,
+}
+
+struct TopOptions {
+    remaining_args: Vec<String>,
+    host:           String,
+    port:           u16,
+    trace_id:       Option<Uuid>,
 }
 
 #[must_use]
@@ -47,22 +56,24 @@ pub fn parse_os_args() -> ParsedArgs {
         }
     }
 
-    parse_args(arg_vec)
+    let mut input = stdin();
+    parse_args(&mut input, arg_vec)
 }
 
-fn parse_args(args: Vec<String>) -> ParsedArgs {
+fn parse_args<R: Read>(input: &mut R, args: Vec<String>) -> ParsedArgs {
     match parse_top_options(args) {
         Err(msg) => ParsedArgs::ShowHelp(msg),
-        Ok((arg_vec, host, port)) => match parse_cmd(arg_vec) {
+        Ok(opts) => match parse_cmd(input, opts.remaining_args) {
             Err(result) => result,
-            Ok(cmd) => ParsedArgs::RunCommand(host, port, cmd),
+            Ok(cmd) => ParsedArgs::RunCommand(opts.host, opts.port, opts.trace_id, cmd),
         },
     }
 }
 
-fn parse_top_options(mut args: Vec<String>) -> Result<(Vec<String>, String, u16), Option<String>> {
+fn parse_top_options(mut args: Vec<String>) -> Result<TopOptions, Option<String>> {
     let mut host = "localhost".to_string();
     let mut port = 7843;
+    let mut trace_id = None;
     args.reverse();
 
     loop {
@@ -94,6 +105,21 @@ fn parse_top_options(mut args: Vec<String>) -> Result<(Vec<String>, String, u16)
                             return Err(Some("Missing argument to --port".to_string()));
                         }
                     },
+                    "--trace-id" => {
+                        args.pop();
+                        if let Some(new_trace_id) = args.pop() {
+                            match Uuid::parse_str(&new_trace_id) {
+                                Err(err) => {
+                                    return Err(Some(format!("Failed to parse {} as trace id: {}", new_trace_id, err)));
+                                },
+                                Ok(new_trace_id) => {
+                                    trace_id = Some(new_trace_id);
+                                },
+                            };
+                        } else {
+                            return Err(Some("Missing argument to --trace-id".to_string()));
+                        }
+                    },
                     "--help" => return Err(None),
                     _ => {
                         if s.starts_with('-') {
@@ -107,17 +133,22 @@ fn parse_top_options(mut args: Vec<String>) -> Result<(Vec<String>, String, u16)
         };
     }
 
-    Ok((args, host, port))
+    Ok(TopOptions {
+        remaining_args: args,
+        host,
+        port,
+        trace_id,
+    })
 }
 
-fn parse_cmd(mut args: Vec<String>) -> Result<Command, ParsedArgs> {
+fn parse_cmd<R: Read>(input: &mut R, mut args: Vec<String>) -> Result<Command, ParsedArgs> {
     match args.pop() {
         None => Err(ParsedArgs::ShowHelp(None)),
         Some(cmd) => {
             let s: &str = &cmd;
             match s {
                 "queue" => parse_queue_cmd(args),
-                "message" => parse_message_cmd(args),
+                "message" => parse_message_cmd(input, args),
                 "help" => Err(ParsedArgs::ShowHelp(None)),
                 _ => Err(ParsedArgs::ShowHelp(Some(format!("Unrecognized command {}", cmd)))),
             }
@@ -162,7 +193,15 @@ const fn empty_queue_config() -> QueueConfig {
     }
 }
 
-fn parse_message_cmd(mut args: Vec<String>) -> Result<Command, ParsedArgs> {
+const fn empty_owned_publishable_message() -> OwnedPublishableMessage {
+    OwnedPublishableMessage {
+        content_type:     String::new(),
+        content_encoding: None,
+        message:          Vec::new(),
+    }
+}
+
+fn parse_message_cmd<R: Read>(input: &mut R, mut args: Vec<String>) -> Result<Command, ParsedArgs> {
     match args.pop() {
         None => Err(ParsedArgs::ShowHelp(None)),
         Some(sub_cmd) => {
@@ -176,7 +215,7 @@ fn parse_message_cmd(mut args: Vec<String>) -> Result<Command, ParsedArgs> {
                     }
                 }),
                 "publish" => {
-                    parse_queue_and_message(args).map(|(queue, message)| Command::PublishMessage(queue, message))
+                    parse_queue_and_message(input, args).map(|(queue, message)| Command::PublishMessage(queue, message))
                 },
                 "delete" => parse_message_id(args).map(Command::DeleteMessage),
                 "help" => Err(ParsedArgs::ShowHelp(None)),
@@ -489,15 +528,15 @@ fn parse_queue_limit_and_timeout(mut args: Vec<String>) -> Result<(String, u16, 
 
     Ok((queue_name, limit, timeout))
 }
-fn parse_queue_and_message(mut args: Vec<String>) -> Result<(String, OwnedPublishableMessage), ParsedArgs> {
+
+fn parse_queue_and_message<R: Read>(
+    input: &mut R,
+    mut args: Vec<String>,
+) -> Result<(String, OwnedPublishableMessage), ParsedArgs> {
     let mut queue_name = None;
     let mut content_type = None;
     let mut content_encoding = None;
-    let cmd = Command::PublishMessage(String::new(), OwnedPublishableMessage {
-        content_type:     String::new(),
-        content_encoding: None,
-        message:          Vec::new(),
-    });
+    let cmd = Command::PublishMessage(String::new(), empty_owned_publishable_message());
 
     while let Some(arg) = args.pop() {
         let s: &str = &arg;
@@ -557,7 +596,7 @@ fn parse_queue_and_message(mut args: Vec<String>) -> Result<(String, OwnedPublis
     };
 
     let mut message = Vec::new();
-    stdin()
+    input
         .read_to_end(&mut message)
         .map_err(|err| ParsedArgs::ShowCommandHelp(Some(format!("Failed to read message from stdin: {}", err)), cmd))?;
 
@@ -567,6 +606,7 @@ fn parse_queue_and_message(mut args: Vec<String>) -> Result<(String, OwnedPublis
         message,
     }))
 }
+
 fn parse_message_id(mut args: Vec<String>) -> Result<String, ParsedArgs> {
     let mut message_id = None;
     let cmd = Command::DeleteMessage(String::new());
@@ -605,4 +645,182 @@ fn parse_message_id(mut args: Vec<String>) -> Result<String, ParsedArgs> {
     };
 
     Ok(message_id)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::args::{Command::*, ParsedArgs::*};
+
+    fn mk_show_help(s: &str) -> ParsedArgs {
+        ShowHelp(Some(s.to_string()))
+    }
+
+    fn mk_show_command_help(cmd: &Command) -> ParsedArgs {
+        ShowCommandHelp(None, cmd.clone())
+    }
+
+    fn mk_show_command_help_with_message(s: &str, cmd: &Command) -> ParsedArgs {
+        ShowCommandHelp(Some(s.to_string()), cmd.clone())
+    }
+
+    fn mk_run_command(cmd: Command) -> ParsedArgs {
+        RunCommand("localhost".to_string(), 7843, None, cmd)
+    }
+
+    struct TestCase {
+        args:     Vec<&'static str>,
+        input:    &'static str,
+        expected: ParsedArgs,
+    }
+
+    fn no_input(args: Vec<&'static str>, expected: ParsedArgs) -> TestCase {
+        with_input(args, "", expected)
+    }
+
+    fn with_input(args: Vec<&'static str>, input: &'static str, expected: ParsedArgs) -> TestCase {
+        TestCase { args, input, expected }
+    }
+
+    #[test]
+    fn parse_args() {
+        let create_queue = CreateQueue(String::new(), empty_queue_config());
+        let update_queue = UpdateQueue(String::new(), empty_queue_config());
+        let delete_queue = DeleteQueue(String::new());
+        let list_queues = ListQueues(None, None);
+        let describe_queue = DescribeQueue(String::new());
+        let receive_messages = ReceiveMessages(String::new(), 0, None);
+        let publish_message = PublishMessage(String::new(), empty_owned_publishable_message());
+        let delete_message = DeleteMessage(String::new());
+
+        let test_cases = [
+            no_input(vec![], ShowHelp(None)),
+            no_input(vec!["help"], ShowHelp(None)),
+            no_input(vec!["invalid"], mk_show_help("Unrecognized command invalid")),
+            no_input(vec!["--help"], ShowHelp(None)),
+            no_input(vec!["--invalid"], mk_show_help("Unrecognized option --invalid")),
+            no_input(vec!["--host"], mk_show_help("Missing argument to --host")),
+            no_input(vec!["--port"], mk_show_help("Missing argument to --port")),
+            no_input(vec!["--trace-id"], mk_show_help("Missing argument to --trace-id")),
+            no_input(vec!["--host", "hostname"], ShowHelp(None)),
+            no_input(vec!["--host", "hostname", "--help"], ShowHelp(None)),
+            no_input(vec!["--host", "hostname", "--port", "1234", "--help"], ShowHelp(None)),
+            no_input(vec!["--port", "not a port"], mk_show_help("Failed to parse not a port as port: invalid digit found in string")),
+            no_input(vec!["--port", "1234"], ShowHelp(None)),
+            no_input(vec!["--port", "1234", "--help"], ShowHelp(None)),
+            no_input(vec!["--trace-id", "4aa662d5-b5c9-4f1c-b4ce-09e7ca6c57a5"], ShowHelp(None)),
+            no_input(vec!["--trace-id", "not a uuid"], mk_show_help("Failed to parse not a uuid as trace id: invalid length: expected one of [36, 32], found 10")),
+            no_input(vec!["--trace-id", "4aa662d5-b5c9-4f1c-b4ce-09e7ca6c57a5", "--help"], ShowHelp(None)),
+            no_input(vec!["queue", "help"], ShowHelp(None)),
+            no_input(vec!["message", "help"], ShowHelp(None)),
+            no_input(vec!["queue", "create", "help"], mk_show_command_help(&create_queue)),
+            no_input(vec!["queue", "update", "help"], mk_show_command_help(&update_queue)),
+            no_input(vec!["queue", "delete", "help"], mk_show_command_help(&delete_queue)),
+            no_input(vec!["queue", "list", "help"], mk_show_command_help(&list_queues)),
+            no_input(vec!["queue", "describe", "help"], mk_show_command_help(&describe_queue)),
+            no_input(vec!["message", "receive", "help"], mk_show_command_help(&receive_messages)),
+            no_input(vec!["message", "publish", "help"], mk_show_command_help(&publish_message)),
+            no_input(vec!["message", "delete", "help"], mk_show_command_help(&delete_message)),
+            no_input(vec!["queue", "create"], mk_show_command_help_with_message("You have to specify a queue. You can use --queue-name [QUEUE] to specify one.", &create_queue)),
+            no_input(vec!["queue", "create", "--queue-name", "test-queue"], mk_show_command_help_with_message("You have to specify the retention timeout. You can use --retention-timeout [SECONDS] to specify it.", &create_queue)),
+            no_input(vec!["queue", "create", "--queue-name", "test-queue", "--retention-timeout", "300"], mk_show_command_help_with_message("You have to specify the visibility timeout. You can use --visibility-timeout [SECONDS] to specify it.", &create_queue)),
+            no_input(vec!["queue", "create", "--queue-name", "test-queue", "--retention-timeout", "300", "--visibility-timeout", "30"], mk_run_command(CreateQueue("test-queue".to_string(), QueueConfig {
+                redrive_policy: None,
+                retention_timeout: 300,
+                visibility_timeout: 30,
+                message_delay: 0,
+                message_deduplication: false,
+            }))),
+            no_input(vec!["queue", "create", "--queue-name", "test-queue", "--retention-timeout", "300", "--visibility-timeout", "30", "--dead-letter-queue", "dead-queue", "--max-receives", "10", "--message-delay", "15", "--message-deduplication", "true"], mk_run_command(CreateQueue("test-queue".to_string(), QueueConfig {
+                redrive_policy: Some(QueueRedrivePolicy {
+                    dead_letter_queue: "dead-queue".to_string(),
+                    max_receives: 10,
+                }),
+                retention_timeout: 300,
+                visibility_timeout: 30,
+                message_delay: 15,
+                message_deduplication: true,
+            }))),
+            no_input(vec!["queue", "create", "--queue-name", "test-queue", "--retention-timeout", "300", "--visibility-timeout", "30", "--dead-letter-queue", "dead-queue"], mk_show_command_help_with_message("You have to specify the maximum number of receives if you specify a dead letter queue. You can use --max-receives [NUMBER] to specify it.", &create_queue)),
+            no_input(vec!["queue", "create", "--queue-name", "test-queue", "--retention-timeout", "300", "--visibility-timeout", "30", "--max-receives", "10"], mk_show_command_help_with_message("You have to specify the dead letter queue if you specify a maximum number of receives. You can use --dead-letter-queue [QUEUE] to specify it.", &create_queue)),
+            no_input(vec!["queue", "create", "--queue-name", "test-queue", "--max-receives", "not a number"], mk_show_command_help_with_message("Failed to parse not a number as maximum number of receives: invalid digit found in string", &create_queue)),
+            no_input(vec!["queue", "create", "--queue-name", "test-queue", "--retention-timeout", "not a number"], mk_show_command_help_with_message("Failed to parse not a number as retention timeout: invalid digit found in string", &create_queue)),
+            no_input(vec!["queue", "create", "--queue-name", "test-queue", "--visibility-timeout", "not a number"], mk_show_command_help_with_message("Failed to parse not a number as visibility timeout: invalid digit found in string", &create_queue)),
+            no_input(vec!["queue", "create", "--queue-name", "test-queue", "--message-delay", "not a number"], mk_show_command_help_with_message("Failed to parse not a number as maximum number of receives: invalid digit found in string", &create_queue)),
+            no_input(vec!["queue", "create", "--queue-name", "test-queue", "--message-deduplication", "not a bool"], mk_show_command_help_with_message("Failed to parse not a bool as message deduplication: provided string was not `true` or `false`", &create_queue)),
+            no_input(vec!["queue", "create", "--queue-name", "test-queue", "--invalid"], mk_show_command_help_with_message("Unrecognized argument --invalid", &create_queue)),
+            no_input(vec!["queue", "update", "--queue-name", "test-queue", "--retention-timeout", "300", "--visibility-timeout", "30"], mk_run_command(UpdateQueue("test-queue".to_string(), QueueConfig {
+                redrive_policy: None,
+                retention_timeout: 300,
+                visibility_timeout: 30,
+                message_delay: 0,
+                message_deduplication: false,
+            }))),
+            no_input(vec!["queue", "invalid"], mk_show_help("Unrecognized queue subcommand invalid")),
+            no_input(vec!["queue", "list"], mk_run_command(ListQueues(None, None))),
+            no_input(vec!["queue", "list", "--offset", "20"], mk_run_command(ListQueues(Some(20), None))),
+            no_input(vec!["queue", "list", "--offset", "not a number"], mk_show_command_help_with_message("Failed to parse not a number as number of queues to skip: invalid digit found in string", &list_queues)),
+            no_input(vec!["queue", "list", "--limit", "10"], mk_run_command(ListQueues(None, Some(10)))),
+            no_input(vec!["queue", "list", "--limit", "not a number"], mk_show_command_help_with_message("Failed to parse not a number as maximum number of queues to list: invalid digit found in string", &list_queues)),
+            no_input(vec!["queue", "list", "--offset", "20", "--limit", "10"], mk_run_command(ListQueues(Some(20), Some(10)))),
+            no_input(vec!["queue", "list", "--invalid"], mk_show_command_help_with_message("Unrecognized argument --invalid", &list_queues)),
+            no_input(vec!["queue", "delete"], mk_show_command_help_with_message("You have to specify a queue. You can use --queue-name [QUEUE] to specify one.", &delete_queue)),
+            no_input(vec!["queue", "delete", "--queue-name"], mk_show_command_help_with_message("Missing argument to --queue-name. You need to specify the queue to operate on.", &delete_queue)),
+            no_input(vec!["queue", "delete", "--queue-name", "delete-this"], mk_run_command(DeleteQueue("delete-this".to_string()))),
+            no_input(vec!["queue", "delete", "--invalid"], mk_show_command_help_with_message("Unrecognized argument --invalid", &delete_queue)),
+            no_input(vec!["queue", "describe"], mk_show_command_help_with_message("You have to specify a queue. You can use --queue-name [QUEUE] to specify one.", &describe_queue)),
+            no_input(vec!["queue", "describe", "--queue-name"], mk_show_command_help_with_message("Missing argument to --queue-name. You need to specify the queue to operate on.", &describe_queue)),
+            no_input(vec!["queue", "describe", "--queue-name", "describe-this"], mk_run_command(DescribeQueue("describe-this".to_string()))),
+            no_input(vec!["queue", "describe", "--invalid"], mk_show_command_help_with_message("Unrecognized argument --invalid", &describe_queue)),
+            no_input(vec!["message", "invalid"], mk_show_help("Unrecognized message subcommand invalid")),
+            no_input(vec!["message", "receive"], mk_show_command_help_with_message("You have to specify a queue. You can use --queue-name [QUEUE] to specify one.", &receive_messages)),
+            no_input(vec!["message", "receive", "--queue-name"], mk_show_command_help_with_message("Missing argument to --queue-name. You need to specify the queue to operate on.", &receive_messages)),
+            no_input(vec!["message", "receive", "--queue-name", "test-queue"], mk_run_command(ReceiveMessage("test-queue".to_string(), None))),
+            no_input(vec!["message", "receive", "--queue-name", "test-queue", "--limit"], mk_show_command_help_with_message("Missing argument to --limit. You need to specify the maximum number of messages to retrieve.", &receive_messages)),
+            no_input(vec!["message", "receive", "--queue-name", "test-queue", "--limit", "5"], mk_run_command(ReceiveMessages("test-queue".to_string(), 5, None))),
+            no_input(vec!["message", "receive", "--queue-name", "test-queue", "--limit", "not a number"], mk_show_command_help_with_message("Failed to parse not a number as maximum number of messages to retrieve: invalid digit found in string", &receive_messages)),
+            no_input(vec!["message", "receive", "--queue-name", "test-queue", "--timeout"], mk_show_command_help_with_message("Missing argument to --timeout. You need to specify the maximum number of seconds to wait.", &receive_messages)),
+            no_input(vec!["message", "receive", "--queue-name", "test-queue", "--timeout", "10"], mk_run_command(ReceiveMessage("test-queue".to_string(), Some(10)))),
+            no_input(vec!["message", "receive", "--queue-name", "test-queue", "--timeout", "not a number"], mk_show_command_help_with_message("Failed to parse not a number as maximum number of seconds to wait: invalid digit found in string", &receive_messages)),
+            no_input(vec!["message", "receive", "--queue-name", "test-queue", "--limit", "5", "--timeout", "10"], mk_run_command(ReceiveMessages("test-queue".to_string(), 5, Some(10)))),
+            no_input(vec!["message", "receive", "--invalid"], mk_show_command_help_with_message("Unrecognized argument --invalid", &receive_messages)),
+            no_input(vec!["message", "publish"], mk_show_command_help_with_message("You have to specify a queue. You can use --queue-name [QUEUE] to specify one.", &publish_message)),
+            no_input(vec!["message", "publish", "--queue-name"], mk_show_command_help_with_message("Missing argument to --queue-name. You need to specify the queue to operate on.", &publish_message)),
+            no_input(vec!["message", "publish", "--queue-name", "test-queue"], mk_show_command_help_with_message("You have to specify the content type. You can use --content-type [CONTENT TYPE] to specify it.", &publish_message)),
+            no_input(vec!["message", "publish", "--queue-name", "test-queue", "--content-type"], mk_show_command_help_with_message("Missing argument to --content-type. You need to specify the content-type of the message.", &publish_message)),
+            with_input(vec!["message", "publish", "--queue-name", "test-queue", "--content-type", "text/plain"], "abc", mk_run_command(PublishMessage("test-queue".to_string(), OwnedPublishableMessage {
+                content_type: "text/plain".to_string(),
+                content_encoding: None,
+                message: "abc".as_bytes().to_vec(),
+            }))),
+            no_input(vec!["message", "publish", "--queue-name", "test-queue", "--content-type", "text/plain", "--content-encoding"], mk_show_command_help_with_message("Missing argument to --content-encoding. You need to specify the content-encoding of the message.", &publish_message)),
+            with_input(vec!["message", "publish", "--queue-name", "test-queue", "--content-type", "text/plain", "--content-encoding", "identity"], "abc", mk_run_command(PublishMessage("test-queue".to_string(), OwnedPublishableMessage {
+                content_type: "text/plain".to_string(),
+                content_encoding: Some("identity".to_string()),
+                message: "abc".as_bytes().to_vec(),
+            }))),
+            no_input(vec!["message", "publish", "--invalid"], mk_show_command_help_with_message("Unrecognized argument --invalid", &publish_message)),
+            no_input(vec!["message", "delete"], mk_show_command_help_with_message("You have to specify the message id. You can use --message-id [MESSAGE ID] to specify it.", &delete_message)),
+            no_input(vec!["message", "delete", "--message-id"], mk_show_command_help_with_message("Missing argument to --message-id. You need to specify the id of the message.", &delete_message)),
+            no_input(vec!["message", "delete", "--message-id", "test-message"], mk_run_command(DeleteMessage("test-message".to_string()))),
+            no_input(vec!["message", "delete", "--invalid"], mk_show_command_help_with_message("Unrecognized argument --invalid", &delete_message)),
+        ];
+
+        for test_case in test_cases {
+            let args = {
+                let mut v = Vec::with_capacity(test_case.args.len());
+                for arg in test_case.args {
+                    v.push(arg.to_string());
+                }
+                v
+            };
+
+            let parsed = super::parse_args(&mut test_case.input.as_bytes(), args.clone());
+            assert_eq!(
+                parsed, test_case.expected,
+                "Parsing '{:?}' should yield {:?} but got {:?}",
+                args, test_case.expected, parsed
+            );
+        }
+    }
 }

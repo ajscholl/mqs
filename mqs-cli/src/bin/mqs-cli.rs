@@ -14,12 +14,12 @@ fn main() {
 
             1
         },
-        ParsedArgs::RunCommand(host, port, cmd) => {
+        ParsedArgs::RunCommand(host, port, trace_id, cmd) => {
             let rt = Builder::new_multi_thread()
                 .enable_all()
                 .build()
                 .expect("Failed to create async runtime");
-            rt.block_on(run_command(&host, port, cmd))
+            rt.block_on(run_command(&host, port, trace_id, cmd))
         },
     };
 
