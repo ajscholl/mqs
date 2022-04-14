@@ -5,13 +5,12 @@ use crate::{
     connection::Source,
     models::{health::HealthCheckRepository, message::MessageRepository, queue::QueueRepository},
     router::{
-        health::HealthHandler,
         messages::{DeleteMessageHandler, PublishMessagesHandler, ReceiveMessagesHandler},
         queues::{CreateQueueHandler, DeleteQueueHandler, DescribeQueueHandler, ListQueuesHandler, UpdateQueueHandler},
     },
 };
 
-mod health;
+pub mod health;
 mod messages;
 mod queues;
 
@@ -54,9 +53,9 @@ impl<R: QueueRepository + MessageRepository, S: Source<R>> WildcardRouter<(R, S)
 
 /// Create a new instance of the router.
 #[must_use]
-pub fn make_router<R: QueueRepository + MessageRepository + HealthCheckRepository, S: Source<R>>() -> Router<(R, S)> {
+pub fn make<R: QueueRepository + MessageRepository + HealthCheckRepository, S: Source<R>>() -> Router<(R, S)> {
     Router::default()
-        .with_route_simple("health", Method::GET, HealthHandler)
+        .with_route_simple("health", Method::GET, health::Handler)
         .with_route(
             "queues",
             Router::new_simple(Method::GET, ListQueuesHandler).with_wildcard(QueuesSubRouter),
@@ -67,9 +66,12 @@ pub fn make_router<R: QueueRepository + MessageRepository + HealthCheckRepositor
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::models::{
-        queue::QueueInput,
-        test::{CloneSource, TestRepo},
+    use crate::{
+        make_router,
+        models::{
+            queue::QueueInput,
+            test::{CloneSource, TestRepo},
+        },
     };
     use hyper::{Body, Request, Response, StatusCode};
     use mqs_common::{
@@ -107,7 +109,7 @@ mod test {
         let router = make_router::<Arc<Mutex<TestRepo>>, CloneSource<Arc<Mutex<TestRepo>>>>();
         let handler = router.route(&Method::GET, vec!["health"].into_iter());
         assert!(handler.is_some());
-        let handler = handler.unwrap();
+        let handler = handler.expect("handler should have been found");
         {
             let mut response = run_handler(handler.clone(), &repo);
             assert_eq!(StatusCode::from(Status::Ok), response.status());

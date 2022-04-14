@@ -50,7 +50,7 @@ mod test {
     use super::*;
 
     #[test]
-    fn hyper_identity() {
+    async fn hyper_identity() {
         let statuses = [
             Status::Ok,
             Status::Created,

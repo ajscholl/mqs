@@ -84,6 +84,7 @@ impl<A> Router<A> {
     /// Create a new router from the current router which routes a request to the root with the given
     /// method to the given handler. Panics the router already has a handler for the root and the
     /// given method.
+    #[must_use]
     pub fn with_handler<H: 'static + Handler<A>>(mut self, method: Method, handler: H) -> Self {
         if let Some(_existing) = self.handler.insert(method, Arc::new(handler)) {
             panic!("Can not set handler - already set!");
@@ -93,6 +94,7 @@ impl<A> Router<A> {
 
     /// Create a new router from the current router with the next segment handled by the given wildcard
     /// router. Panics if the router already has a wildcard router set.
+    #[must_use]
     pub fn with_wildcard<R: 'static + WildcardRouter<A>>(mut self, handler: R) -> Self {
         if self.wildcard_router.is_some() {
             panic!("Can not set wildcard - already set!");
@@ -113,6 +115,7 @@ impl<A> Router<A> {
 
     /// Create a new router from the current router handling a request to the given route (a single
     /// segment) with the given method handled by the given handler.
+    #[must_use]
     pub fn with_route_simple<H: 'static + Handler<A>>(self, route: &'static str, method: Method, handler: H) -> Self {
         self.with_route(route, Self::new_simple(method, handler))
     }
@@ -121,7 +124,6 @@ impl<A> Router<A> {
 #[cfg(test)]
 pub(crate) mod test {
     use super::*;
-    use crate::test::make_runtime;
     use hyper::header::HeaderValue;
 
     struct SimpleHandler;
@@ -180,11 +182,10 @@ pub(crate) mod test {
     }
 
     #[test]
-    fn route_simple_root() {
+    async fn route_simple_root() {
         let router = Router::new_simple(Method::GET, SimpleHandler);
         let handler = router.route(&Method::GET, vec![""].into_iter()).unwrap();
-        let rt = make_runtime();
-        let response = rt.block_on(async { handler.handle((), Request::new(Body::default()), Vec::new()).await });
+        let response = handler.handle((), Request::new(Body::default()), Vec::new()).await;
         assert_eq!(
             response.headers().get("X-SIMPLE-HANDLER"),
             Some(&HeaderValue::from_static("simple"))
@@ -192,15 +193,14 @@ pub(crate) mod test {
     }
 
     #[test]
-    fn route_simple_sub() {
+    async fn route_simple_sub() {
         let router = Router::default().with_route("sub", Router::new_simple(Method::GET, SimpleHandler));
         assert!(router.route(&Method::GET, vec![""].into_iter()).is_none());
         assert!(router.route(&Method::GET, vec!["another"].into_iter()).is_none());
         assert!(router.route(&Method::GET, vec!["another", "sub"].into_iter()).is_none());
         assert!(router.route(&Method::POST, vec!["sub"].into_iter()).is_none());
         let handler = router.route(&Method::GET, vec!["sub"].into_iter()).unwrap();
-        let rt = make_runtime();
-        let response = rt.block_on(async { handler.handle((), Request::new(Body::default()), Vec::new()).await });
+        let response = handler.handle((), Request::new(Body::default()), Vec::new()).await;
         assert_eq!(
             response.headers().get("X-SIMPLE-HANDLER"),
             Some(&HeaderValue::from_static("simple"))
@@ -208,7 +208,7 @@ pub(crate) mod test {
     }
 
     #[test]
-    fn route_nested() {
+    async fn route_nested() {
         let router = Router::default().with_route(
             "sub",
             Router::default()
@@ -230,8 +230,7 @@ pub(crate) mod test {
         assert!(router.route(&Method::GET, vec!["sub", "route"].into_iter()).is_none());
         {
             let handler = router.route(&Method::POST, vec!["sub", "route"].into_iter()).unwrap();
-            let rt = make_runtime();
-            let response = rt.block_on(async { handler.handle((), Request::new(Body::default()), Vec::new()).await });
+            let response = handler.handle((), Request::new(Body::default()), Vec::new()).await;
             assert_eq!(
                 response.headers().get("X-SIMPLE-HANDLER"),
                 Some(&HeaderValue::from_static("simple"))
@@ -239,8 +238,7 @@ pub(crate) mod test {
         }
         {
             let handler = router.route(&Method::GET, vec!["sub", "static"].into_iter()).unwrap();
-            let rt = make_runtime();
-            let response = rt.block_on(async { handler.handle((), Request::new(Body::default()), Vec::new()).await });
+            let response = handler.handle((), Request::new(Body::default()), Vec::new()).await;
             assert_eq!(
                 response.headers().get("X-STATIC-HANDLER"),
                 Some(&HeaderValue::from_static("my message"))
@@ -248,8 +246,7 @@ pub(crate) mod test {
         }
         {
             let handler = router.route(&Method::GET, vec!["sub"].into_iter()).unwrap();
-            let rt = make_runtime();
-            let response = rt.block_on(async { handler.handle((), Request::new(Body::default()), Vec::new()).await });
+            let response = handler.handle((), Request::new(Body::default()), Vec::new()).await;
             assert_eq!(
                 response.headers().get("X-STATIC-HANDLER"),
                 Some(&HeaderValue::from_static("just sub GET"))
@@ -257,8 +254,7 @@ pub(crate) mod test {
         }
         {
             let handler = router.route(&Method::POST, vec!["sub"].into_iter()).unwrap();
-            let rt = make_runtime();
-            let response = rt.block_on(async { handler.handle((), Request::new(Body::default()), Vec::new()).await });
+            let response = handler.handle((), Request::new(Body::default()), Vec::new()).await;
             assert_eq!(
                 response.headers().get("X-STATIC-HANDLER"),
                 Some(&HeaderValue::from_static("just sub POST"))
@@ -267,7 +263,7 @@ pub(crate) mod test {
     }
 
     #[test]
-    fn route_wildcard() {
+    async fn route_wildcard() {
         let router = Router::default()
             .with_route(
                 "collect",
@@ -280,8 +276,7 @@ pub(crate) mod test {
             .is_none());
         {
             let handler = router.route(&Method::GET, vec!["simple"].into_iter()).unwrap();
-            let rt = make_runtime();
-            let response = rt.block_on(async { handler.handle((), Request::new(Body::default()), Vec::new()).await });
+            let response = handler.handle((), Request::new(Body::default()), Vec::new()).await;
             assert_eq!(
                 response.headers().get("X-SIMPLE-HANDLER"),
                 Some(&HeaderValue::from_static("simple"))
@@ -289,8 +284,7 @@ pub(crate) mod test {
         }
         {
             let handler = router.route(&Method::GET, vec!["collect", "a"].into_iter()).unwrap();
-            let rt = make_runtime();
-            let response = rt.block_on(async { handler.handle((), Request::new(Body::default()), Vec::new()).await });
+            let response = handler.handle((), Request::new(Body::default()), Vec::new()).await;
             assert_eq!(
                 response.headers().get("X-COLLECTED"),
                 Some(&HeaderValue::from_static("1"))
@@ -304,8 +298,7 @@ pub(crate) mod test {
             let handler = router
                 .route(&Method::GET, vec!["collect", "a", "b"].into_iter())
                 .unwrap();
-            let rt = make_runtime();
-            let response = rt.block_on(async { handler.handle((), Request::new(Body::default()), Vec::new()).await });
+            let response = handler.handle((), Request::new(Body::default()), Vec::new()).await;
             assert_eq!(
                 response.headers().get("X-COLLECTED"),
                 Some(&HeaderValue::from_static("2"))
@@ -319,8 +312,7 @@ pub(crate) mod test {
             let handler = router
                 .route(&Method::GET, vec!["collect", "a", "b", "c"].into_iter())
                 .unwrap();
-            let rt = make_runtime();
-            let response = rt.block_on(async { handler.handle((), Request::new(Body::default()), Vec::new()).await });
+            let response = handler.handle((), Request::new(Body::default()), Vec::new()).await;
             assert_eq!(
                 response.headers().get("X-COLLECTED"),
                 Some(&HeaderValue::from_static("3"))

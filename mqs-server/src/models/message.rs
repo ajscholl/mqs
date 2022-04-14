@@ -1,13 +1,12 @@
-use chrono::{DateTime, Duration, NaiveDateTime, Utc};
 use diesel::{
     backend::Backend,
-    pg::{types::date_and_time::PgInterval, Pg},
+    pg::Pg,
     prelude::*,
     query_builder::{AstPass, QueryFragment},
     result::{DatabaseErrorKind, Error},
 };
+use mqs_common::UtcTime;
 use sha2::{Digest, Sha256};
-use std::ops::Add;
 use uuid::Uuid;
 
 use crate::{
@@ -33,8 +32,8 @@ pub struct NewMessage<'a> {
     pub hash:             Option<String>,
     pub queue:            &'a str,
     pub receives:         i32,
-    pub visible_since:    NaiveDateTime,
-    pub created_at:       NaiveDateTime,
+    pub visible_since:    UtcTime,
+    pub created_at:       UtcTime,
     pub trace_id:         Option<Uuid>,
 }
 
@@ -47,16 +46,9 @@ pub struct Message {
     pub hash:             Option<String>,
     pub queue:            String,
     pub receives:         i32,
-    pub visible_since:    NaiveDateTime,
-    pub created_at:       NaiveDateTime,
+    pub visible_since:    UtcTime,
+    pub created_at:       UtcTime,
     pub trace_id:         Option<Uuid>,
-}
-
-pub fn add_pg_interval(time: &DateTime<Utc>, offset: &PgInterval) -> DateTime<Utc> {
-    let us = Duration::microseconds(offset.microseconds);
-    let d = Duration::days(i64::from(offset.days));
-    let m = Duration::days(i64::from(offset.months) * 30);
-    time.add(us + d + m)
 }
 
 pub trait MessageRepository: Send {
@@ -69,8 +61,8 @@ pub trait MessageRepository: Send {
 
 impl MessageRepository for PgRepository {
     fn insert_message(&self, queue: &Queue, input: &MessageInput<'_>) -> QueryResult<bool> {
-        let now = Utc::now();
-        let visible_since = add_pg_interval(&now, &queue.message_delay);
+        let now = UtcTime::now();
+        let visible_since = now.add_pg_interval(&queue.message_delay);
         let id = Uuid::new_v4();
         let hash = if queue.content_based_deduplication {
             let mut digest = Sha256::default();
@@ -89,8 +81,8 @@ impl MessageRepository for PgRepository {
                 hash,
                 queue: &queue.name,
                 receives: 0,
-                visible_since: visible_since.naive_utc(),
-                created_at: now.naive_utc(),
+                visible_since,
+                created_at: now,
                 trace_id: input.trace_id,
             })
             .execute(&*self.conn);
@@ -102,18 +94,15 @@ impl MessageRepository for PgRepository {
     }
 
     fn get_message_from_queue(&self, queue: &Queue, count: i64) -> QueryResult<Vec<Message>> {
-        let now = Utc::now();
-        let visible_since = add_pg_interval(&now, &queue.visibility_timeout);
+        let now = UtcTime::now();
+        let visible_since = now.add_pg_interval(&queue.visibility_timeout);
 
         let update_query = diesel::dsl::update(messages::table)
             .set((
-                messages::visible_since.eq(visible_since.naive_utc()),
+                messages::visible_since.eq(visible_since),
                 messages::receives.eq(messages::receives + 1),
             ))
-            .filter(In::new(
-                messages::id,
-                MessageIdsForFetch::new(&queue.name, now.naive_utc(), count),
-            ))
+            .filter(In::new(messages::id, MessageIdsForFetch::new(&queue.name, now, count)))
             .returning(messages::all_columns);
 
         let messages: Vec<Message> = update_query.get_results(&*self.conn)?;
@@ -123,8 +112,7 @@ impl MessageRepository for PgRepository {
         let mut move_to_dead_letter_queue = Vec::new();
         let mut to_delete = Vec::new();
         for message in messages {
-            let created_at = DateTime::from_utc(message.created_at, Utc);
-            if add_pg_interval(&created_at, &queue.retention_timeout) < now {
+            if message.created_at.add_pg_interval(&queue.retention_timeout) < now {
                 to_delete.push(message.id);
                 continue;
             }
@@ -172,12 +160,12 @@ impl MessageRepository for PgRepository {
 
 struct MessageIdsForFetch<'a> {
     queue_name:    &'a str,
-    visible_since: NaiveDateTime,
+    visible_since: UtcTime,
     count:         i64,
 }
 
 impl<'a> MessageIdsForFetch<'a> {
-    const fn new(queue_name: &'a str, visible_since: NaiveDateTime, count: i64) -> Self {
+    const fn new(queue_name: &'a str, visible_since: UtcTime, count: i64) -> Self {
         Self {
             queue_name,
             visible_since,

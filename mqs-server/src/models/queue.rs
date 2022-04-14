@@ -1,11 +1,10 @@
 use cached::{once_cell::sync::Lazy, stores::TimedCache, Cached};
-use chrono::{NaiveDateTime, Utc};
 use diesel::{
     pg::data_types::PgInterval,
     prelude::*,
     result::{DatabaseErrorKind, Error},
 };
-use mqs_common::{QueueConfig, QueueConfigOutput, QueueRedrivePolicy};
+use mqs_common::{QueueConfig, QueueConfigOutput, QueueRedrivePolicy, UtcTime};
 use std::{
     convert::TryFrom,
     sync::{
@@ -57,8 +56,8 @@ pub struct NewQueue<'a> {
     pub visibility_timeout:          PgInterval,
     pub message_delay:               PgInterval,
     pub content_based_deduplication: bool,
-    pub created_at:                  NaiveDateTime,
-    pub updated_at:                  NaiveDateTime,
+    pub created_at:                  UtcTime,
+    pub updated_at:                  UtcTime,
 }
 
 #[derive(Queryable, Associations, Identifiable, Clone, Debug, PartialEq)]
@@ -71,8 +70,8 @@ pub struct Queue {
     pub visibility_timeout:          PgInterval,
     pub message_delay:               PgInterval,
     pub content_based_deduplication: bool,
-    pub created_at:                  NaiveDateTime,
-    pub updated_at:                  NaiveDateTime,
+    pub created_at:                  UtcTime,
+    pub updated_at:                  UtcTime,
 }
 
 impl Queue {
@@ -126,7 +125,7 @@ pub struct QueueDescription {
     pub queue:              Queue,
     pub messages:           i64,
     pub visible_messages:   i64,
-    pub oldest_message_age: i64,
+    pub oldest_message_age: u64,
 }
 
 static CACHE_HITS: AtomicUsize = AtomicUsize::new(0);
@@ -188,7 +187,7 @@ impl QueueSource for PgRepository {
 
 impl QueueRepository for PgRepository {
     fn insert_queue(&self, queue: &QueueInput<'_>) -> QueryResult<Option<Queue>> {
-        let now = Utc::now();
+        let now = UtcTime::now();
         let result = diesel::dsl::insert_into(queues::table)
             .values(NewQueue {
                 name:                        queue.name,
@@ -201,8 +200,8 @@ impl QueueRepository for PgRepository {
                 visibility_timeout:          pg_interval(queue.visibility_timeout),
                 message_delay:               pg_interval(queue.message_delay),
                 content_based_deduplication: queue.content_based_deduplication,
-                created_at:                  now.naive_utc(),
-                updated_at:                  now.naive_utc(),
+                created_at:                  now,
+                updated_at:                  now,
             })
             .returning(queues::all_columns)
             .get_result(&*self.conn);
@@ -225,16 +224,12 @@ impl QueueRepository for PgRepository {
                     .filter(messages::queue.eq(&queue.name))
                     .count()
                     .get_result(&*self.conn)?;
-                let now = Utc::now();
+                let now = UtcTime::now();
                 let visible_messages = messages::table
-                    .filter(
-                        messages::queue
-                            .eq(&queue.name)
-                            .and(messages::visible_since.le(now.naive_utc())),
-                    )
+                    .filter(messages::queue.eq(&queue.name).and(messages::visible_since.le(now)))
                     .count()
                     .get_result(&*self.conn)?;
-                let oldest_message: Option<NaiveDateTime> = messages::table
+                let oldest_message: Option<UtcTime> = messages::table
                     .select(messages::created_at)
                     .filter(messages::queue.eq(&queue.name))
                     .limit(1)
@@ -250,7 +245,7 @@ impl QueueRepository for PgRepository {
                     visible_messages,
                     oldest_message_age: match oldest_message {
                         None => 0,
-                        Some(created_at) => now.naive_utc().timestamp() - created_at.timestamp(),
+                        Some(created_at) => now.since(&created_at).map_or(0, |d| d.as_secs()),
                     },
                 }))
             },
@@ -281,7 +276,7 @@ impl QueueRepository for PgRepository {
                 queues::visibility_timeout.eq(pg_interval(queue.visibility_timeout)),
                 queues::message_delay.eq(pg_interval(queue.message_delay)),
                 queues::content_based_deduplication.eq(queue.content_based_deduplication),
-                queues::updated_at.eq(Utc::now().naive_utc()),
+                queues::updated_at.eq(UtcTime::now()),
             ))
             .returning(queues::all_columns)
             .get_result(&*self.conn)
@@ -329,8 +324,8 @@ mod test {
                 visibility_timeout:          pg_interval(30),
                 message_delay:               pg_interval(30),
                 content_based_deduplication: false,
-                created_at:                  Utc::now().naive_utc(),
-                updated_at:                  Utc::now().naive_utc(),
+                created_at:                  UtcTime::now(),
+                updated_at:                  UtcTime::now(),
             }))
         }
     }

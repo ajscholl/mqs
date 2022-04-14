@@ -392,7 +392,7 @@ mod test {
     }
 
     #[test]
-    fn split_by() {
+    async fn split_by() {
         {
             let (a, b) = super::split_by(b"a:b", &b':').unwrap();
             assert_eq!(a, b"a");
@@ -419,7 +419,7 @@ mod test {
     }
 
     #[test]
-    fn trim_bytes() {
+    async fn trim_bytes() {
         assert_eq!(super::trim_bytes(b"asd"), b"asd");
         assert_eq!(super::trim_bytes(b"  asd"), b"asd");
         assert_eq!(super::trim_bytes(b"asd "), b"asd");
@@ -428,7 +428,7 @@ mod test {
     }
 
     #[test]
-    fn encode_multipart() {
+    async fn encode_multipart() {
         let (boundary, body) = encode(get_input().into_iter());
         assert_eq!(
             std::str::from_utf8(body.as_slice()).unwrap(),
@@ -440,7 +440,7 @@ mod test {
     }
 
     #[test]
-    fn is_multipart() {
+    async fn is_multipart() {
         assert_eq!(None, super::is_multipart("text/plain"));
         assert_eq!(None, super::is_multipart("text/plain; boundary=abc"));
         assert_eq!(None, super::is_multipart("multipart"));
@@ -466,7 +466,7 @@ mod test {
     }
 
     #[test]
-    fn parse_multipart() {
+    async fn parse_multipart() {
         let parsed = parse(
             b"--abc",
             b"ignore this\r\n--abc\r\nContent-Type: text/plain\r\n\r\nThis is my text\r\n--abc\r\n\r\nThis has no content type\r\n\r\n--abc--this is ignored",
@@ -485,7 +485,7 @@ mod test {
     }
 
     #[test]
-    fn parse_multipart_lwsp() {
+    async fn parse_multipart_lwsp() {
         let parsed = parse(
             b"--abc",
             b"ignore this\r\n--abc   \r\nContent-Type: text/plain; \r\n charset=utf-8 \r\nContent-Encoding: identity\r\n\r\nThis is my text\r\n--abc\r\n \r\n\r\nThis has no content type\r\n\r\n--abc--this is ignored",
@@ -505,7 +505,7 @@ mod test {
     }
 
     #[test]
-    fn gen_and_parse() {
+    async fn gen_and_parse() {
         let input = get_input();
         let (boundary, body) = encode(input.clone().into_iter());
         assert!(!boundary.starts_with("--"));
@@ -527,7 +527,7 @@ mod test {
     }
 
     #[test]
-    fn skip_linear_whitespace() {
+    async fn skip_linear_whitespace() {
         assert_eq!(super::skip_linear_whitespace(b""), 0);
         assert_eq!(super::skip_linear_whitespace(b" "), 1);
         assert_eq!(super::skip_linear_whitespace(b"\t"), 1);

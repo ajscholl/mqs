@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use log::{Level, Log, Metadata, Record};
 use std::{
     cell::Cell,
@@ -6,11 +5,11 @@ use std::{
     sync::Mutex,
 };
 
-use crate::logger::get_trace_id;
+use crate::{logger::get_trace_id, UtcTime};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 struct LogMessage<'a> {
-    timestamp:   DateTime<Utc>,
+    timestamp:   UtcTime,
     level:       String,
     level_num:   i32,
     target:      &'a str,
@@ -24,7 +23,7 @@ struct LogMessage<'a> {
 impl<'a> LogMessage<'a> {
     fn build(record: &Record<'a>) -> Self {
         LogMessage {
-            timestamp:   Utc::now(),
+            timestamp:   UtcTime::now(),
             level:       record.level().to_string(),
             level_num:   record.level() as i32,
             target:      record.target(),
@@ -123,6 +122,7 @@ impl<W: Write + Send> Log for Logger<W> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::UtcTime;
     use std::io::Error;
 
     struct TestWriter {
@@ -138,7 +138,7 @@ mod test {
             }
         }
 
-        fn assert_expectations(&self, mut start_time: DateTime<Utc>, expected_messages: Vec<(Level, &str)>) {
+        fn assert_expectations(&self, mut start_time: UtcTime, expected_messages: Vec<(Level, &str)>) {
             assert!(self.flushed);
             let messages = String::from_utf8(self.written.clone()).unwrap();
             let lines: Vec<&str> = messages.split("\n").collect();
@@ -201,9 +201,9 @@ mod test {
     }
 
     #[test]
-    fn logger_test() {
+    async fn logger_test() {
         let logger = Logger::new(Level::Info, TestWriter::new());
-        let start_time = Utc::now();
+        let start_time = UtcTime::now();
 
         log(
             &logger,

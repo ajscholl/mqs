@@ -120,8 +120,7 @@ pub static MESSAGE_WAIT_QUEUE: Lazy<MessageWaitQueue> = Lazy::new(MessageWaitQue
 pub mod test {
     use super::*;
     use crate::models::queue::pg_interval;
-    use chrono::Utc;
-    use mqs_common::test::make_runtime;
+    use mqs_common::{test::make_runtime, UtcTime};
     use std::time::Duration;
     use tokio::time::sleep;
 
@@ -135,8 +134,8 @@ pub mod test {
             visibility_timeout:          pg_interval(30),
             message_delay:               pg_interval(30),
             content_based_deduplication: false,
-            created_at:                  Utc::now().naive_utc(),
-            updated_at:                  Utc::now().naive_utc(),
+            created_at:                  UtcTime::now(),
+            updated_at:                  UtcTime::now(),
         }
     }
 

@@ -15,7 +15,6 @@ use mqs_common::{
 use serde::Serialize;
 
 use crate::models::message::Message;
-use chrono::{DateTime, SecondsFormat, Utc};
 
 pub mod messages;
 pub mod queues;
@@ -127,14 +126,10 @@ impl MqsResponse {
         if let Ok(value) = HeaderValue::from_str(&format!("{}", message.receives)) {
             headers.insert(MessageReceivesHeader::name(), value);
         }
-        if let Ok(value) = HeaderValue::from_str(
-            &DateTime::<Utc>::from_utc(message.created_at, Utc).to_rfc3339_opts(SecondsFormat::Secs, true),
-        ) {
+        if let Ok(value) = HeaderValue::from_str(&message.created_at.to_rfc3339()) {
             headers.insert(PublishedAtHeader::name(), value);
         }
-        if let Ok(value) = HeaderValue::from_str(
-            &DateTime::<Utc>::from_utc(message.visible_since, Utc).to_rfc3339_opts(SecondsFormat::Secs, true),
-        ) {
+        if let Ok(value) = HeaderValue::from_str(&message.visible_since.to_rfc3339()) {
             headers.insert(VisibleAtHeader::name(), value);
         }
     }
@@ -143,8 +138,7 @@ impl MqsResponse {
 #[cfg(test)]
 pub(crate) mod test {
     use super::*;
-    use chrono::Utc;
-    use mqs_common::test::read_body;
+    use mqs_common::{test::read_body, UtcTime};
 
     #[test]
     fn status_response() {
@@ -191,7 +185,7 @@ pub(crate) mod test {
     }
 
     fn mk_message(index: u8, encoding: Option<String>) -> Message {
-        let now = Utc::now();
+        let now = UtcTime::now();
         Message {
             id:               uuid::Uuid::from_bytes([
                 10 + index,
@@ -217,8 +211,8 @@ pub(crate) mod test {
             hash:             None,
             queue:            String::new(),
             receives:         index as i32 + 1,
-            visible_since:    now.naive_utc(),
-            created_at:       now.naive_utc(),
+            visible_since:    now,
+            created_at:       now,
             trace_id:         None,
         }
     }
@@ -273,18 +267,18 @@ pub(crate) mod test {
                     boundary,
                     encoding_header,
                     "0a141e28-0b15-1f29-0c16-202b0e18222c",
-                    DateTime::<Utc>::from_utc(messages[0].created_at, Utc).to_rfc3339_opts(SecondsFormat::Secs, true),
-                    DateTime::<Utc>::from_utc(messages[0].visible_since, Utc).to_rfc3339_opts(SecondsFormat::Secs, true),
+                    messages[0].created_at.to_rfc3339(),
+                    messages[0].visible_since.to_rfc3339(),
                     boundary,
                     encoding_header,
                     "0b141e28-0b15-1f29-0c16-202b0e18222c",
-                    DateTime::<Utc>::from_utc(messages[1].created_at, Utc).to_rfc3339_opts(SecondsFormat::Secs, true),
-                    DateTime::<Utc>::from_utc(messages[1].visible_since, Utc).to_rfc3339_opts(SecondsFormat::Secs, true),
+                    messages[1].created_at.to_rfc3339(),
+                    messages[1].visible_since.to_rfc3339(),
                     boundary,
                     encoding_header,
                     "0c141e28-0b15-1f29-0c16-202b0e18222c",
-                    DateTime::<Utc>::from_utc(messages[2].created_at, Utc).to_rfc3339_opts(SecondsFormat::Secs, true),
-                    DateTime::<Utc>::from_utc(messages[2].visible_since, Utc).to_rfc3339_opts(SecondsFormat::Secs, true),
+                    messages[2].created_at.to_rfc3339(),
+                    messages[2].visible_since.to_rfc3339(),
                     boundary
                 )
                 .as_bytes(),

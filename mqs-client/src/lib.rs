@@ -35,7 +35,6 @@
 //! assert!(!success.is_ok());
 //! ```
 
-use chrono::{DateTime, Utc};
 use hyper::{
     client::{Client, HttpConnector},
     header::{HeaderName, HeaderValue, CONNECTION, CONTENT_ENCODING, CONTENT_TYPE},
@@ -57,6 +56,7 @@ use mqs_common::{
     QueuesResponse,
     Status::ServiceUnavailable,
     TraceIdHeader,
+    UtcTime,
     VisibleAtHeader,
     DEFAULT_CONTENT_TYPE,
 };
@@ -192,9 +192,9 @@ pub struct MessageResponse {
     /// Number of times this message was already received.
     pub message_receives: i32,
     /// Timestamp of the message being published.
-    pub published_at:     DateTime<Utc>,
+    pub published_at:     UtcTime,
     /// Timestamp of the next time the message will be visible again.
-    pub visible_at:       DateTime<Utc>,
+    pub visible_at:       UtcTime,
     /// Trace id of the message.
     pub trace_id:         Option<Uuid>,
     /// Encoded body of the message.
@@ -809,9 +809,9 @@ impl Service {
             status => Err(ClientError::ServiceError(status)),
         }?;
         body.map_or(Err(ClientError::TooLargeResponse), |body| {
-            if body.as_slice().eq(b"green") {
+            if body.as_slice() == b"green" {
                 Ok(true)
-            } else if body.as_slice().eq(b"red") {
+            } else if body.as_slice() == b"red" {
                 Ok(false)
             } else {
                 Err(ClientError::HealthCheckError)
@@ -847,7 +847,9 @@ mod test {
             )
         );
         let msg = PublishableMessage {
-            trace_id:         Some(Uuid::parse_str("96a372de-2db0-405b-a49e-fbcddcabefdb").unwrap()),
+            trace_id:         Some(
+                Uuid::parse_str("96a372de-2db0-405b-a49e-fbcddcabefdb").expect("should be a valid uuid"),
+            ),
             content_encoding: Some("encoding"),
             content_type:     "type",
             message:          vec![4, 5, 6],

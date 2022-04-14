@@ -9,18 +9,31 @@ stages:
 - publish
 
 variables:
-  # 1.56.0, but we still need the nightly channel for most of our cargo fmt options
-  RUST_VERSION: nightly-2021-08-05
+  # 1.61.0, but we still need the nightly channel for most of our cargo fmt options
+  RUST_VERSION: nightly-2022-02-23
+
+.template:rust:
+  image: rust:1.59.0-buster
+  before_script:
+    - export CARGO_HOME=/usr/local/cargo
+    - export RUSTUP_HOME=/usr/local/rustup
+    - export PATH="$CARGO_HOME/bin:$RUSTUP_HOME/bin:$PATH"
+    - mkdir -p "$(pwd)/usr/local/cargo" "$(pwd)/usr/local/rustup"
+    - mv "$(pwd)/usr/local/cargo" /usr/local/cargo
+    - mv "$(pwd)/usr/local/rustup" /usr/local/rustup
+    - rustup default "$RUST_VERSION"
+  after_script:
+    - mv /usr/local/cargo "$(pwd)/usr/local/cargo"
+    - mv /usr/local/rustup "$(pwd)/usr/local/rustup"
+  cache:
+    paths:
+      - target
+      - usr/local
 
 test:
-  image: rust:1.54.0-buster
+  extends: .template:rust
   stage: compile
   script:
-     - export CARGO_HOME="$(pwd)/usr/local/cargo"
-     - export RUSTUP_HOME="$(pwd)/usr/local/rustup"
-     - export PATH="$CARGO_HOME/bin:$RUSTUP_HOME/bin:$PATH"
-     - mkdir -p "$CARGO_HOME" "$RUSTUP_HOME"
-     - rustup default "$RUST_VERSION"
      - rustup component add rustfmt
      - rustup component add clippy
      - cargo test --locked
@@ -31,50 +44,22 @@ test:
      - cargo clippy -Z unstable-options -- -D clippy::all -D clippy::pedantic -D clippy::nursery -W clippy::module_name_repetitions -A clippy::missing-errors-doc -A clippy::missing-panics-doc
   cache:
     key: test
-    paths:
-      - target
-      - usr/local
 
 audit:
-  image: rust:1.54.0-buster
+  extends: .template:rust
   stage: compile
-  before_script:
-    - mkdir -p "$(pwd)/usr/local/cargo" "$(pwd)/usr/local/rustup"
-    - mv "$(pwd)/usr/local/cargo" /usr/local/cargo
-    - mv "$(pwd)/usr/local/rustup" /usr/local/rustup
   script:
-     - export CARGO_HOME=/usr/local/cargo
-     - export RUSTUP_HOME=/usr/local/rustup
-     - export PATH="$CARGO_HOME/bin:$RUSTUP_HOME/bin:$PATH"
-     - rustup default "$RUST_VERSION"
      - cargo install cargo-audit
      - cargo audit
-  after_script:
-    - mv /usr/local/cargo "$(pwd)/usr/local/cargo"
-    - mv /usr/local/rustup "$(pwd)/usr/local/rustup"
   cache:
     key: audit
-    paths:
-      - target
-      - usr/local
 
 coverage:
-  image: rust:1.54.0-buster
+  extends: .template:rust
   stage: compile
-  before_script:
-    - mkdir -p "$(pwd)/usr/local/cargo" "$(pwd)/usr/local/rustup"
-    - mv "$(pwd)/usr/local/cargo" /usr/local/cargo
-    - mv "$(pwd)/usr/local/rustup" /usr/local/rustup
   script:
-     - export CARGO_HOME=/usr/local/cargo
-     - export RUSTUP_HOME=/usr/local/rustup
-     - export PATH="$CARGO_HOME/bin:$RUSTUP_HOME/bin:$PATH"
-     - rustup default "$RUST_VERSION"
      - cargo install cargo-tarpaulin --version "=0.18.0"
      - cargo tarpaulin --locked --line --out Html --workspace --verbose
-  after_script:
-    - mv /usr/local/cargo "$(pwd)/usr/local/cargo"
-    - mv /usr/local/rustup "$(pwd)/usr/local/rustup"
   artifacts:
     paths:
       - tarpaulin-report.html
@@ -82,19 +67,11 @@ coverage:
   coverage: '/(\d+\.\d+)% coverage/'
   cache:
     key: coverage
-    paths:
-      - target
-      - usr/local
 
 compile:
-  image: rust:1.54.0-buster
+  extends: .template:rust
   stage: compile
   script:
-     - export CARGO_HOME="$(pwd)/usr/local/cargo"
-     - export RUSTUP_HOME="$(pwd)/usr/local/rustup"
-     - export PATH="$CARGO_HOME/bin:$RUSTUP_HOME/bin:$PATH"
-     - mkdir -p "$CARGO_HOME" "$RUSTUP_HOME"
-     - rustup default "$RUST_VERSION"
      - cargo build --locked --release
      - mkdir -p bin
      - cp target/release/mqs bin
@@ -114,9 +91,6 @@ compile:
     expire_in: 1 week
   cache:
     key: compile
-    paths:
-      - target
-      - usr/local
 
 .template:image:
   stage: image

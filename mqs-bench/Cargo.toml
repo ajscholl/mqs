@@ -14,24 +14,20 @@ path = "../mqs-client"
 path = "../mqs-server"
 
 [dependencies.cached]
-version = "0.24.0"
-
-[dependencies.chrono]
-version = "0.4.19"
-features = []
+version = "0.34.0"
 
 [dependencies.dotenv]
 version = "0.15.0"
 
 [dependencies.hyper]
-version = "=0.14.4"
+version = "=0.14.18"
 
 [dependencies.tokio]
-version = "1.9.0"
-features = ["rt", "rt-multi-thread", "sync", "net", "time"]
+version = "1.17.0"
+features = ["rt", "rt-multi-thread", "sync", "net", "time", "signal"]
 
 [dependencies.log]
-version = "0.4.14"
+version = "0.4.16"
 
 [dependencies.uuid]
 version = "0.8.2"

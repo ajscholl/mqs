@@ -23,19 +23,19 @@ pub(crate) mod test {
         connection::Source,
         models::{
             health::HealthCheckRepository,
-            message::{add_pg_interval, Message, MessageInput, MessageRepository},
+            message::{Message, MessageInput, MessageRepository},
             queue::{pg_interval, Queue, QueueDescription, QueueInput, QueueRepository, QueueSource},
         },
     };
-    use chrono::Utc;
     use diesel::QueryResult;
+    use mqs_common::UtcTime;
     use serde::de::StdError;
     use sha2::{Digest, Sha256};
     use std::{
         cell::Cell,
         collections::HashMap,
         fmt::{Display, Formatter},
-        ops::{Deref, Sub},
+        ops::Deref,
         sync::{Arc, Mutex},
     };
     use uuid::Uuid;
@@ -137,7 +137,7 @@ pub(crate) mod test {
             if found {
                 return Ok(false);
             }
-            let now = Utc::now();
+            let now = UtcTime::now();
             let message = Message {
                 id: Uuid::new_v4(),
                 payload: input.payload.to_vec(),
@@ -146,8 +146,8 @@ pub(crate) mod test {
                 hash,
                 queue: queue.name.to_string(),
                 receives: 0,
-                visible_since: add_pg_interval(&now, &queue.message_delay).naive_utc(),
-                created_at: now.naive_utc(),
+                visible_since: now.add_pg_interval(&queue.message_delay),
+                created_at: now,
                 trace_id: None,
             };
             self.with_messages_mut(|messages| messages.insert(message.id.clone(), message));
@@ -157,17 +157,16 @@ pub(crate) mod test {
 
         fn get_message_from_queue(&self, queue: &Queue, count: i64) -> QueryResult<Vec<Message>> {
             let mut result: Vec<Message> = Vec::with_capacity(count as usize);
-            let now = Utc::now();
-            let naive_now = now.naive_utc();
+            let now = UtcTime::now();
 
             self.with_messages_mut(|messages| {
                 for message in messages.values_mut() {
-                    if message.visible_since.gt(&naive_now) || &message.queue != &queue.name {
+                    if message.visible_since > now || &message.queue != &queue.name {
                         continue;
                     }
 
                     message.receives += 1;
-                    message.visible_since = add_pg_interval(&now, &queue.visibility_timeout).naive_utc();
+                    message.visible_since = now.add_pg_interval(&queue.visibility_timeout);
                     result.push(message.clone());
                 }
             });
@@ -221,7 +220,7 @@ pub(crate) mod test {
             if self.find_by_name(queue.name)?.is_some() {
                 return Ok(None);
             }
-            let now = Utc::now();
+            let now = UtcTime::now();
             let queue = Queue {
                 id:                          self.next_id(),
                 name:                        queue.name.to_string(),
@@ -231,8 +230,8 @@ pub(crate) mod test {
                 visibility_timeout:          pg_interval(queue.visibility_timeout),
                 message_delay:               pg_interval(queue.message_delay),
                 content_based_deduplication: queue.content_based_deduplication,
-                created_at:                  now.naive_utc(),
-                updated_at:                  now.naive_utc(),
+                created_at:                  now,
+                updated_at:                  now,
             };
             self.with_queues_mut(|queues| {
                 queues.insert(queue.name.to_string(), queue.clone());
@@ -251,7 +250,7 @@ pub(crate) mod test {
                 let mut messages_count = 0;
                 let mut visible_messages = 0;
                 let mut oldest_message_age = 0;
-                let now = Utc::now().naive_utc();
+                let now = UtcTime::now();
 
                 self.with_messages(|messages| {
                     for message in messages.values() {
@@ -260,8 +259,10 @@ pub(crate) mod test {
                         }
 
                         messages_count += 1;
-                        visible_messages += if message.visible_since.le(&now) { 1 } else { 0 };
-                        oldest_message_age = oldest_message_age.max(now.sub(message.created_at).num_seconds());
+                        visible_messages += if message.visible_since <= now { 1 } else { 0 };
+                        if let Ok(message_age) = now.since(&message.created_at) {
+                            oldest_message_age = oldest_message_age.max(message_age.as_secs());
+                        }
                     }
 
                     Ok(Some(QueueDescription {
@@ -311,7 +312,7 @@ pub(crate) mod test {
                     message_delay:               pg_interval(queue.message_delay),
                     content_based_deduplication: queue.content_based_deduplication,
                     created_at:                  old.created_at,
-                    updated_at:                  Utc::now().naive_utc(),
+                    updated_at:                  UtcTime::now(),
                 };
                 self.with_queues_mut(|queues| {
                     queues.insert(queue.name.to_string(), queue.clone());

@@ -1,13 +1,13 @@
 use async_trait::async_trait;
 use hyper::{Body, Request, Response};
-use mqs_common::router::Handler;
+use mqs_common::router;
 
 use crate::models::health::HealthCheckRepository;
 
-pub struct HealthHandler;
+pub struct Handler;
 
 #[async_trait]
-impl<R: HealthCheckRepository, S: Send> Handler<(R, S)> for HealthHandler {
+impl<R: HealthCheckRepository, S: Send> router::Handler<(R, S)> for Handler {
     async fn handle(&self, (repo, _): (R, S), _req: Request<Body>, _body: Vec<u8>) -> Response<Body>
     where
         R: 'async_trait,

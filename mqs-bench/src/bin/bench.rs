@@ -15,12 +15,10 @@
 //! Used in CI tests.
 
 use cached::once_cell::sync::Lazy;
-use chrono::{DateTime, Utc};
 use std::{
     env,
     error::Error,
     fmt::{Display, Formatter},
-    ops::Sub,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -31,7 +29,7 @@ use tokio::{runtime::Builder, time::sleep};
 use uuid::Uuid;
 
 use mqs_client::{ClientError, PublishableMessage, Service};
-use mqs_common::QueueConfig;
+use mqs_common::{QueueConfig, UtcTime};
 
 type AnyError = Box<dyn Error + Send + Sync>;
 
@@ -39,18 +37,24 @@ const NUM_THREADS: usize = 25;
 
 #[derive(Debug)]
 struct StringError {
-    error: &'static str,
+    error: String,
 }
 
 impl StringError {
-    const fn new(error: &'static str) -> Self {
+    fn from_str(error: &str) -> Self {
+        Self {
+            error: error.to_string(),
+        }
+    }
+
+    const fn new(error: String) -> Self {
         Self { error }
     }
 }
 
 impl Display for StringError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.error)
+        write!(f, "{}", &self.error)
     }
 }
 
@@ -59,6 +63,66 @@ impl Error for StringError {}
 fn get_service() -> Service {
     let host = env::var("MQS_SERVER").unwrap_or_else(|_| "localhost".to_string());
     Service::new(&format!("http://{}:7843", &host))
+}
+
+fn format_duration(d: Duration) -> String {
+    let (nanos, micros, millis, seconds, minutes, hours, days) = {
+        let mut remaining = d.as_nanos();
+        let nanos = remaining % 1_000;
+        remaining /= 1_000;
+        let micros = remaining % 1_000;
+        remaining /= 1_000;
+        let millis = remaining % 1_000;
+        remaining /= 1_000;
+        let seconds = remaining % 60;
+        remaining /= 60;
+        let minutes = remaining / 60;
+        remaining /= 60;
+        let hours = remaining % 24;
+        remaining /= 24;
+        let days = remaining;
+        (nanos, micros, millis, seconds, minutes, hours, days)
+    };
+
+    let parts = {
+        let mut parts = Vec::new();
+        if days > 0 {
+            parts.push((days, "d"));
+        }
+        if hours > 0 {
+            parts.push((hours, "h"));
+        }
+        if minutes > 0 {
+            parts.push((minutes, "min"));
+        }
+        if seconds > 0 {
+            parts.push((seconds, "s"));
+        }
+        if millis > 0 {
+            parts.push((millis, "ms"));
+        }
+        if micros > 0 {
+            parts.push((micros, "us"));
+        }
+        if nanos > 0 {
+            parts.push((nanos, "ns"));
+        }
+        parts
+    };
+
+    if parts.is_empty() {
+        return "0s".to_string();
+    }
+
+    let mut result = String::new();
+    for (count, unit) in parts {
+        if !result.is_empty() {
+            result.push(' ');
+        }
+        result.push_str(&format!("{} {}", count, unit));
+    }
+
+    result
 }
 
 fn main() -> Result<(), AnyError> {
@@ -72,14 +136,17 @@ fn main() -> Result<(), AnyError> {
 
     rt.block_on(async {
         {
-            if let Err(ClientError::TooLargeResponse) = get_service()
+            match get_service()
                 .set_max_body_size(Some(1))
                 .get_queues(None, None, None)
                 .await
             {
-                // this is the expected case, don't fail
-            } else {
-                return Err(StringError::new("request should have been aborted").into());
+                Err(ClientError::TooLargeResponse) => {
+                    // this is the expected case, don't fail
+                },
+                result => {
+                    return Err(StringError::new(format!("request should have been aborted, got {:?}", result)).into());
+                },
             }
         }
         let s = get_service();
@@ -90,29 +157,32 @@ fn main() -> Result<(), AnyError> {
             let result = s.delete_queue(&queue.name, None).await?;
 
             if result.is_none() {
-                return Err(StringError::new("Failed to delete queue").into());
+                return Err(StringError::from_str("Failed to delete queue").into());
             }
         }
 
         create_queues(queue_count).await?;
         update_queues(queue_count).await?;
 
-        let start_publish = Utc::now();
+        let start_publish = UtcTime::now();
         publish_test_messages(queue_count).await?;
-        let start_consume = Utc::now();
-        let publish_took = start_consume.sub(start_publish);
-        println!("Publishing took: {}", publish_took);
+        let start_consume = UtcTime::now();
+        let publish_took = start_consume.since(&start_publish).unwrap();
+        println!("Publishing took: {}", format_duration(publish_took));
 
         consume_test_messages(queue_count).await?;
-        let end_consume = Utc::now();
-        let consume_took = end_consume.sub(start_consume);
-        println!("Consuming took: {}", consume_took);
+        let end_consume = UtcTime::now();
+        let consume_took = end_consume.since(&start_consume).unwrap();
+        println!("Consuming took: {}", format_duration(consume_took));
 
-        let start_publish_and_consume = Utc::now();
+        let start_publish_and_consume = UtcTime::now();
         publish_and_consume_test_messages(queue_count).await?;
-        let end_publish_and_consume = Utc::now();
-        let publish_and_consume_took = end_publish_and_consume.sub(start_publish_and_consume);
-        println!("Publishing and consuming took: {}", publish_and_consume_took);
+        let end_publish_and_consume = UtcTime::now();
+        let publish_and_consume_took = end_publish_and_consume.since(&start_publish_and_consume).unwrap();
+        println!(
+            "Publishing and consuming took: {}",
+            format_duration(publish_and_consume_took)
+        );
 
         Ok(())
     })
@@ -134,7 +204,7 @@ async fn create_queues(queue_count: usize) -> Result<(), AnyError> {
             .await?;
 
         if result.is_none() {
-            return Err(StringError::new("Failed to create queue").into());
+            return Err(StringError::from_str("Failed to create queue").into());
         }
     }
 
@@ -157,7 +227,7 @@ async fn update_queues(queue_count: usize) -> Result<(), AnyError> {
             .await?;
 
         if result.is_none() {
-            return Err(StringError::new("Failed to update queue").into());
+            return Err(StringError::from_str("Failed to update queue").into());
         }
     }
 
@@ -180,10 +250,10 @@ async fn publish_test_messages(queue_count: usize) -> Result<(), AnyError> {
         let info = s.describe_queue(&queue, None).await?;
         if let Some(description) = info {
             if description.status.messages != 10000 {
-                return Err(StringError::new("Wrong number of messages found").into());
+                return Err(StringError::from_str("Wrong number of messages found").into());
             }
         } else {
-            return Err(StringError::new("Failed to describe queue").into());
+            return Err(StringError::from_str("Failed to describe queue").into());
         }
     }
 
@@ -248,12 +318,12 @@ async fn publish_and_consume_test_messages(queue_count: usize) -> Result<(), Any
 async fn check_queue_empty(s: &Service, queue: &str) -> Result<(), AnyError> {
     let info = s.describe_queue(queue, None).await?;
     info.map_or_else(
-        || Err(StringError::new("Failed to describe queue").into()),
+        || Err(StringError::from_str("Failed to describe queue").into()),
         |description| {
             if description.status.messages == 0 {
                 Ok(())
             } else {
-                Err(StringError::new("Queue not yet empty").into())
+                Err(StringError::from_str("Queue not yet empty").into())
             }
         },
     )
@@ -274,7 +344,7 @@ const DEFAULT_MESSAGE_CONTENT_ENCODING: [Option<&str>; 3] = [Some("identity"), S
 
 // current start minus 1 second (so if we start at 300ms past a full second, truncation in the db
 // will not cause any problems)
-static START: Lazy<DateTime<Utc>> = Lazy::new(|| Utc::now().sub(chrono::Duration::seconds(1)));
+static START: Lazy<UtcTime> = Lazy::new(|| UtcTime::now().sub(Duration::from_secs(1)));
 
 async fn publish_messages(index: usize, queue: String) -> Result<(), AnyError> {
     let s = get_service();
@@ -292,7 +362,7 @@ async fn publish_messages(index: usize, queue: String) -> Result<(), AnyError> {
     for _ in 0..10000 / message_bundle.len() {
         let result = s.publish_messages(&queue, &message_bundle).await?;
         if !result {
-            return Err(StringError::new("Expected successful publish").into());
+            return Err(StringError::from_str("Expected successful publish").into());
         }
         published_messages += message_bundle.len();
     }
@@ -354,42 +424,42 @@ async fn consume_worker(
         for message in messages {
             consumed_messages += 1;
             if message.content_type != DEFAULT_MESSAGE_CONTENT_TYPE[index % DEFAULT_MESSAGE_CONTENT_TYPE.len()] {
-                return Err(StringError::new("Message content type does not match").into());
+                return Err(StringError::from_str("Message content type does not match").into());
             }
             match DEFAULT_MESSAGE_CONTENT_ENCODING[index % DEFAULT_MESSAGE_CONTENT_ENCODING.len()] {
                 None => {
                     if message.content_encoding.is_some() {
-                        return Err(StringError::new("Unexpected message content encoding").into());
+                        return Err(StringError::from_str("Unexpected message content encoding").into());
                     }
                 },
                 Some(encoding) => {
                     if message.content_encoding.is_none() {
-                        return Err(StringError::new("Message content encoding missing").into());
+                        return Err(StringError::from_str("Message content encoding missing").into());
                     }
                     if message.content_encoding.unwrap().as_str() != encoding {
-                        return Err(StringError::new("Message content encoding does not match").into());
+                        return Err(StringError::from_str("Message content encoding does not match").into());
                     }
                 },
             }
             if message.trace_id != DEFAULT_TRACE_ID[index % DEFAULT_TRACE_ID.len()] {
-                return Err(StringError::new("Message trace id does not match").into());
+                return Err(StringError::from_str("Message trace id does not match").into());
             }
             if message.message_receives != 1 {
-                return Err(StringError::new("Message was received wrong number of times").into());
+                return Err(StringError::from_str("Message was received wrong number of times").into());
             }
-            if message.published_at.le(&START) || message.published_at.gt(&Utc::now()) {
-                return Err(StringError::new("Message was published too early or late").into());
+            if message.published_at <= *START || message.published_at > UtcTime::now() {
+                return Err(StringError::from_str("Message was published too early or late").into());
             }
-            if message.visible_at.le(&Utc::now()) {
-                return Err(StringError::new("Message was visible too early").into());
+            if message.visible_at <= UtcTime::now() {
+                return Err(StringError::from_str("Message was visible too early").into());
             }
             if message.content.as_slice() != DEFAULT_MESSAGE[index % DEFAULT_MESSAGE.len()] {
-                return Err(StringError::new("Message content does not match").into());
+                return Err(StringError::from_str("Message content does not match").into());
             }
             let deleted = s.delete_message(None, &message.message_id).await?;
 
             if !deleted {
-                return Err(StringError::new("Failed to delete message").into());
+                return Err(StringError::from_str("Failed to delete message").into());
             }
         }
     }

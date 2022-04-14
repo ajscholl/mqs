@@ -7,23 +7,20 @@ edition = "2018"
 [dependencies.mqs-common]
 path = "../mqs-common"
 
-[dependencies.chrono]
-version = "0.4.19"
-
 [dependencies.hyper]
-version = "=0.14.4"
+version = "=0.14.18"
 features = ["client", "http1", "http2", "runtime"]
 
 [dependencies.serde]
-version = "1.0.127"
+version = "1.0.136"
 
 [dependencies.serde_json]
-version = "1.0.66"
+version = "1.0.79"
 
 [dependencies.uuid]
 version = "0.8.2"
 features = ["serde", "v4"]
 
 [dependencies.tokio]
-version = "1.9.0"
-features = ["rt", "rt-multi-thread", "sync", "net", "time"]
+version = "1.17.0"
+features = ["rt", "rt-multi-thread", "sync", "net", "time", "signal"]

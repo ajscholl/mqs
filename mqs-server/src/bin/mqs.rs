@@ -27,8 +27,21 @@ use hyper::{
     Server,
 };
 use log::{Level, Log};
-use std::{convert::Infallible, env, env::VarError, io::Stdout, net::SocketAddr, sync::Arc, time::Duration};
-use tokio::{runtime::Builder, time::sleep};
+use std::{
+    cell::Cell,
+    convert::Infallible,
+    env,
+    env::VarError,
+    io::Stdout,
+    net::SocketAddr,
+    sync::Arc,
+    time::Duration,
+};
+use tokio::{
+    runtime::{Builder, Runtime},
+    sync::{oneshot::Sender, Mutex},
+    time::sleep,
+};
 
 use mqs_common::{
     logger::{configure_logger, create_trace_id, json::Logger, with_trace_id, NewJsonLogger},
@@ -108,6 +121,35 @@ fn get_max_message_size() -> usize {
     }
 }
 
+#[cfg(unix)]
+fn setup_signal_handler(rt: &Runtime, tx: Sender<()>) {
+    use tokio::signal::unix::{signal, SignalKind};
+
+    let tx_mut = Arc::new(Mutex::new(Cell::new(Some(tx))));
+    for signal_kind in [SignalKind::terminate(), SignalKind::interrupt()] {
+        let tx_mut_clone = tx_mut.clone();
+        rt.spawn(async move {
+            let _ = signal(signal_kind).unwrap().recv().await;
+            warn!("Received signal {:?}, starting shutdown", signal_kind);
+            let lck = tx_mut_clone.lock().await;
+            if let Some(tx) = lck.take() {
+                let _ = tx.send(());
+            }
+        });
+    }
+}
+
+#[cfg(windows)]
+fn setup_signal_handler(rt: &Runtime, tx: Sender<()>) {
+    use tokio::signal::ctrl_c;
+
+    rt.spawn(async move {
+        let _ = ctrl_c().await;
+        warn!("Received signal {:?}, starting shutdown", signal_kind);
+        let _ = tx.send(());
+    });
+}
+
 fn main() {
     static LOGGER: Lazy<Logger<Stdout>, NewJsonLogger> = Lazy::new(NewJsonLogger::new(Level::Info));
 
@@ -129,6 +171,9 @@ fn main() {
         }
     });
 
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    setup_signal_handler(&rt, tx);
+
     rt.block_on(async {
         // Setup and configure server...
         let addr = SocketAddr::from(([0, 0, 0, 0], 7843));
@@ -149,12 +194,17 @@ fn main() {
 
         info!("Started server on {} with a pool of size {}", addr, pool_size);
 
-        // And run forever...
-        if let Err(e) = server.await {
-            error!("server error: {}", e);
+        let graceful = server.with_graceful_shutdown(async {
+            rx.await.ok();
+        });
+
+        // Run the server until we are told to shutdown
+        if let Err(e) = graceful.await {
+            error!("Server terminated with error: {}", e);
+        } else {
+            info!("Completed server shutdown");
         }
 
-        info!("Shutting down server");
         LOGGER.flush();
     });
 }

@@ -1,4 +1,4 @@
-#![feature(unboxed_closures, fn_traits)]
+#![feature(unboxed_closures, fn_traits, in_band_lifetimes)]
 #![warn(
     missing_docs,
     rust_2018_idioms,
@@ -31,8 +31,9 @@ pub mod multipart;
 /// Request routing and handling.
 pub mod router;
 mod status;
+mod time;
 
-use chrono::{DateTime, NaiveDateTime, Utc};
+pub use crate::time::*;
 pub use status::*;
 
 /// Content type used if the client does not specify one.
@@ -141,10 +142,9 @@ impl PublishedAtHeader {
     /// Returns 1970-01-01T00:00:00Z in case the header is missing or contains an invalid value.
     ///
     /// ```
-    /// use chrono::{DateTime, NaiveDateTime, Utc};
     /// use http::HeaderValue;
     /// use hyper::HeaderMap;
-    /// use mqs_common::PublishedAtHeader;
+    /// use mqs_common::{PublishedAtHeader, UtcTime};
     ///
     /// let mut headers = HeaderMap::new();
     /// assert_eq!(PublishedAtHeader::get(&headers), PublishedAtHeader::default());
@@ -157,13 +157,13 @@ impl PublishedAtHeader {
     ///     PublishedAtHeader::name(),
     ///     HeaderValue::from_static("1984-04-04T00:00:00Z"),
     /// );
-    /// let expected = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(449884800, 0), Utc);
+    /// let expected = UtcTime::from_timestamp(449884800);
     /// assert_eq!(PublishedAtHeader::get(&headers), expected);
     /// ```
     #[must_use]
-    pub fn get(headers: &HeaderMap) -> DateTime<Utc> {
+    pub fn get(headers: &HeaderMap) -> UtcTime {
         get_header(headers, Self::name()).map_or_else(Self::default, |s| {
-            DateTime::parse_from_rfc3339(s).map_or_else(|_| Self::default(), |t| t.with_timezone(&Utc))
+            UtcTime::parse_from_rfc3339(s).unwrap_or_else(|_| Self::default())
         })
     }
 
@@ -171,17 +171,13 @@ impl PublishedAtHeader {
     /// Returns the unix epoch at 1970-01-01T00:00:00Z.
     ///
     /// ```
-    /// use chrono::SecondsFormat;
     /// use mqs_common::PublishedAtHeader;
     ///
-    /// assert_eq!(
-    ///     "1970-01-01T00:00:00Z",
-    ///     PublishedAtHeader::default().to_rfc3339_opts(SecondsFormat::Secs, true)
-    /// );
+    /// assert_eq!("1970-01-01T00:00:00Z", PublishedAtHeader::default().to_rfc3339());
     /// ```
     #[must_use]
-    pub fn default() -> DateTime<Utc> {
-        DateTime::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc)
+    pub fn default() -> UtcTime {
+        UtcTime::from_timestamp(0)
     }
 }
 
@@ -210,10 +206,9 @@ impl VisibleAtHeader {
     /// Returns 1970-01-01T00:00:00Z in case the header is missing or contains an invalid value.
     ///
     /// ```
-    /// use chrono::{DateTime, NaiveDateTime, Utc};
     /// use http::HeaderValue;
     /// use hyper::HeaderMap;
-    /// use mqs_common::VisibleAtHeader;
+    /// use mqs_common::{UtcTime, VisibleAtHeader};
     ///
     /// let mut headers = HeaderMap::new();
     /// assert_eq!(VisibleAtHeader::get(&headers), VisibleAtHeader::default());
@@ -226,13 +221,13 @@ impl VisibleAtHeader {
     ///     VisibleAtHeader::name(),
     ///     HeaderValue::from_static("1984-04-04T00:00:00Z"),
     /// );
-    /// let expected = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(449884800, 0), Utc);
+    /// let expected = UtcTime::from_timestamp(449884800);
     /// assert_eq!(VisibleAtHeader::get(&headers), expected);
     /// ```
     #[must_use]
-    pub fn get(headers: &HeaderMap) -> DateTime<Utc> {
+    pub fn get(headers: &HeaderMap) -> UtcTime {
         get_header(headers, Self::name()).map_or_else(Self::default, |s| {
-            DateTime::parse_from_rfc3339(s).map_or_else(|_| Self::default(), |t| t.with_timezone(&Utc))
+            UtcTime::parse_from_rfc3339(s).unwrap_or_else(|_| Self::default())
         })
     }
 
@@ -240,17 +235,13 @@ impl VisibleAtHeader {
     /// Returns the unix epoch at 1970-01-01T00:00:00Z.
     ///
     /// ```
-    /// use chrono::SecondsFormat;
     /// use mqs_common::VisibleAtHeader;
     ///
-    /// assert_eq!(
-    ///     "1970-01-01T00:00:00Z",
-    ///     VisibleAtHeader::default().to_rfc3339_opts(SecondsFormat::Secs, true)
-    /// );
+    /// assert_eq!("1970-01-01T00:00:00Z", VisibleAtHeader::default().to_rfc3339());
     /// ```
     #[must_use]
-    pub fn default() -> DateTime<Utc> {
-        DateTime::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc)
+    pub fn default() -> UtcTime {
+        UtcTime::from_timestamp(0)
     }
 }
 
@@ -378,7 +369,7 @@ pub struct QueueStatus {
     /// Number of messages which can currently be received in the queue.
     pub visible_messages:   i64,
     /// Age in seconds of the oldest message in the queue.
-    pub oldest_message_age: i64,
+    pub oldest_message_age: u64,
 }
 
 /// Queue configuration as returned by the server.
@@ -404,7 +395,9 @@ impl Drop for QueueConfigOutput {
     fn drop(&mut self) {}
 }
 
-fn exchange<T>(a: &mut T, mut b: T) -> T {
+// replace the referenced value with the default value and return the referenced value.
+fn extract<T: Default>(a: &mut T) -> T {
+    let mut b = T::default();
     std::mem::swap(a, &mut b);
 
     b
@@ -451,11 +444,11 @@ impl QueueConfigOutput {
         mut self,
         messages: i64,
         visible_messages: i64,
-        oldest_message_age: i64,
+        oldest_message_age: u64,
     ) -> QueueDescriptionOutput {
         QueueDescriptionOutput {
-            name:                  exchange(&mut self.name, String::new()),
-            redrive_policy:        exchange(&mut self.redrive_policy, None),
+            name:                  extract(&mut self.name),
+            redrive_policy:        extract(&mut self.redrive_policy),
             retention_timeout:     self.retention_timeout,
             visibility_timeout:    self.visibility_timeout,
             message_delay:         self.message_delay,
@@ -572,24 +565,20 @@ pub mod test {
     }
 
     #[test]
-    fn read_big_body() {
-        let read = make_runtime().block_on(async {
-            crate::read_body(&mut Body::from("this is too large".to_string()), Some(5))
-                .await
-                .unwrap()
-        });
+    async fn read_big_body() {
+        let read = crate::read_body(&mut Body::from("this is too large".to_string()), Some(5))
+            .await
+            .unwrap();
         assert_eq!(read, None);
-        let read = make_runtime().block_on(async {
-            crate::read_body(&mut Body::from("this is ok".to_string()), Some(50))
-                .await
-                .unwrap()
-        });
+        let read = crate::read_body(&mut Body::from("this is ok".to_string()), Some(50))
+            .await
+            .unwrap();
         assert!(read.is_some());
         assert_eq!(read.unwrap().as_slice(), b"this is ok");
     }
 
     #[test]
-    fn into_description() {
+    async fn into_description() {
         let output = QueueConfigOutput {
             name:                  "queue".to_string(),
             redrive_policy:        Some(QueueRedrivePolicy {
@@ -621,7 +610,7 @@ pub mod test {
     }
 
     #[test]
-    fn get_headers() {
+    async fn get_headers() {
         use hyper::header::{HeaderValue, CONTENT_TYPE};
 
         let mut headers = HeaderMap::new();
@@ -631,7 +620,7 @@ pub mod test {
     }
 
     #[test]
-    fn test_trace_id_header() {
+    async fn test_trace_id_header() {
         use hyper::header::HeaderValue;
 
         assert_eq!(HeaderName::from_static("x-trace-id"), TraceIdHeader::name());

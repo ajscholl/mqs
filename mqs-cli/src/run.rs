@@ -1,5 +1,4 @@
 use crate::args::Command;
-use chrono::SecondsFormat;
 use mqs_client::{ClientError, MessageResponse, PublishableMessage, Service};
 use serde::Serialize;
 use uuid::Uuid;
@@ -60,8 +59,8 @@ fn print_messages(messages: Vec<MessageResponse>) {
             content_type:     message.content_type,
             content_encoding: message.content_encoding,
             message_receives: message.message_receives,
-            published_at:     message.published_at.to_rfc3339_opts(SecondsFormat::Secs, true),
-            visible_at:       message.visible_at.to_rfc3339_opts(SecondsFormat::Secs, true),
+            published_at:     message.published_at.to_rfc3339(),
+            visible_at:       message.visible_at.to_rfc3339(),
             trace_id:         message.trace_id.map(|trace_id| trace_id.to_string()),
             content:          base64::encode(message.content),
         });

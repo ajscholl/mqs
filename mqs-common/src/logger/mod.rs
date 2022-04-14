@@ -68,5 +68,5 @@ impl<Args> FnMut<Args> for NewJsonLogger {
 pub fn configure_logger<W: Write + Send>(logger: &'static Logger<W>) {
     log::set_logger(logger)
         .map(|()| log::set_max_level(logger.level().to_level_filter()))
-        .unwrap();
+        .expect("logger has already been configured once");
 }

@@ -30,4 +30,4 @@ pub(crate) mod schema;
 pub(crate) mod wait;
 
 pub use models::PgRepository;
-pub use router::make_router;
+pub use router::make as make_router;

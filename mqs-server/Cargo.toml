@@ -6,37 +6,34 @@ edition = "2018"
 
 [dependencies.mqs-common]
 path = "../mqs-common"
+features = ["diesel"]
 
 [dependencies.async-trait]
-version = "0.1.51"
+version = "0.1.53"
 
 [dependencies.base64]
 version = "0.13.0"
 
 [dependencies.cached]
-version = "0.24.0"
-
-[dependencies.chrono]
-version = "0.4.19"
-features = ["serde"]
+version = "0.34.0"
 
 [dependencies.diesel]
-version = "1.4.7"
-features = ["postgres", "chrono", "uuidv07"]
+version = "1.4.8"
+features = ["postgres", "uuidv07"]
 
 [dependencies.dotenv]
 version = "0.15.0"
 
 [dependencies.hyper]
-version = "=0.14.4"
+version = "=0.14.18"
 features = ["server", "http1", "http2", "runtime"]
 
 [dependencies.tokio]
-version = "1.9.0"
-features = ["rt", "rt-multi-thread", "sync", "net", "time"]
+version = "1.17.0"
+features = ["rt", "rt-multi-thread", "sync", "net", "time", "signal"]
 
 [dependencies.log]
-version = "0.4.14"
+version = "0.4.16"
 
 [dependencies.r2d2]
 version = "0.8.9"
@@ -45,16 +42,16 @@ version = "0.8.9"
 version = "1.0.0"
 
 [dependencies.sha2]
-version = "0.9.5"
+version = "0.10.2"
 
 [dependencies.serde]
-version = "1.0.127"
+version = "1.0.136"
 
 [dependencies.serde_derive]
-version = "1.0.127"
+version = "1.0.136"
 
 [dependencies.serde_json]
-version = "1.0.66"
+version = "1.0.79"
 
 [dependencies.uuid]
 version = "0.8.2"

@@ -27,11 +27,10 @@ pub async fn publish<R: QueueRepository + MessageRepository>(
     message_content: &[u8],
     headers: HeaderMap<HeaderValue>,
 ) -> MqsResponse {
-    let messages = if let Some(boundary) = boundary_from_headers(&headers) {
-        multipart::parse(boundary.as_bytes(), message_content)
-    } else {
-        Ok(vec![(headers, message_content)])
-    };
+    let messages = boundary_from_headers(&headers).map_or_else(
+        || Ok(vec![(headers, message_content)]),
+        |boundary| multipart::parse(boundary.as_bytes(), message_content),
+    );
     let messages = match messages {
         Err(err) => {
             error!("Failed to understand request body: {}", err);

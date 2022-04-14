@@ -5,33 +5,41 @@ authors = ["Jonas Scholl <jonas.scholl@lingumatiker.de>"]
 edition = "2018"
 
 [dependencies.async-trait]
-version = "0.1.51"
+version = "0.1.53"
 
-[dependencies.chrono]
-version = "0.4.19"
-features = ["serde"]
+[dependencies.cached]
+version = "0.34.0"
+
+[dependencies.diesel]
+version = "1.4.8"
+features = ["postgres"]
+optional = true
 
 [dependencies.http]
-version = "0.2.4"
+version = "0.2.6"
 
 [dependencies.hyper]
-version = "=0.14.4"
+version = "=0.14.18"
 
 [dependencies.log]
-version = "0.4.14"
+version = "0.4.16"
 
 [dependencies.serde]
-version = "1.0.127"
+version = "1.0.136"
 
 [dependencies.serde_derive]
-version = "1.0.127"
+version = "1.0.136"
 
 [dependencies.serde_json]
-version = "1.0.66"
+version = "1.0.79"
+
+[dependencies.time]
+version = "0.3.9"
+features = ["serde"]
 
 [dependencies.tokio]
-version = "1.9.0"
-features = ["rt", "rt-multi-thread", "sync", "net", "time"]
+version = "1.17.0"
+features = ["rt", "rt-multi-thread", "sync", "net", "time", "signal"]
 
 [dependencies.uuid]
 version = "0.8.2"

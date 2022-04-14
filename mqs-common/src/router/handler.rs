@@ -140,7 +140,6 @@ mod test {
     use crate::{
         read_body,
         router::{Handler, Router},
-        test::make_runtime,
     };
     use async_trait::async_trait;
     use hyper::{Body, Method, Request, Response};
@@ -163,37 +162,35 @@ mod test {
     }
 
     #[test]
-    fn test_handler() {
-        make_runtime().block_on(async {
-            let router = Router::new_simple(Method::GET, EchoHandler {});
-            let mut response = handle(None, (), &router, 100, Request::new(Body::default())).await;
-            assert_eq!(response.status(), 503);
-            assert_eq!(
-                read_body(response.body_mut(), None).await.unwrap().unwrap(),
-                b"{\"error\":\"Service unavailable, try again later\"}".as_ref()
-            );
-            let mut response = handle(Some(42), (), &router, 100, Request::new(Body::default())).await;
-            assert_eq!(response.status(), 200);
-            assert_eq!(read_body(response.body_mut(), None).await.unwrap().unwrap(), b"42 -> ");
-            let mut response = handle(Some(42), (), &router, 3, Request::new(Body::from("hello".to_string()))).await;
-            assert_eq!(response.status(), 413);
-            assert_eq!(
-                read_body(response.body_mut(), None).await.unwrap().unwrap(),
-                b"{\"error\":\"Payload too large\"}".as_ref()
-            );
-            let mut response = handle(
-                Some(42),
-                (),
-                &Router::default(),
-                3,
-                Request::new(Body::from("hello".to_string())),
-            )
-            .await;
-            assert_eq!(response.status(), 404);
-            assert_eq!(
-                read_body(response.body_mut(), None).await.unwrap().unwrap(),
-                b"{\"error\":\"No handler found for request\"}".as_ref()
-            );
-        });
+    async fn test_handler() {
+        let router = Router::new_simple(Method::GET, EchoHandler {});
+        let mut response = handle(None, (), &router, 100, Request::new(Body::default())).await;
+        assert_eq!(response.status(), 503);
+        assert_eq!(
+            read_body(response.body_mut(), None).await.unwrap().unwrap(),
+            b"{\"error\":\"Service unavailable, try again later\"}".as_ref()
+        );
+        let mut response = handle(Some(42), (), &router, 100, Request::new(Body::default())).await;
+        assert_eq!(response.status(), 200);
+        assert_eq!(read_body(response.body_mut(), None).await.unwrap().unwrap(), b"42 -> ");
+        let mut response = handle(Some(42), (), &router, 3, Request::new(Body::from("hello".to_string()))).await;
+        assert_eq!(response.status(), 413);
+        assert_eq!(
+            read_body(response.body_mut(), None).await.unwrap().unwrap(),
+            b"{\"error\":\"Payload too large\"}".as_ref()
+        );
+        let mut response = handle(
+            Some(42),
+            (),
+            &Router::default(),
+            3,
+            Request::new(Body::from("hello".to_string())),
+        )
+        .await;
+        assert_eq!(response.status(), 404);
+        assert_eq!(
+            read_body(response.body_mut(), None).await.unwrap().unwrap(),
+            b"{\"error\":\"No handler found for request\"}".as_ref()
+        );
     }
 }
