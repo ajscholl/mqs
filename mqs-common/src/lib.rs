@@ -24,12 +24,18 @@ extern crate tokio;
 use hyper::{body::HttpBody, header::HeaderName, Body, HeaderMap};
 use uuid::Uuid;
 
+/// Utilities to connect to the database.
+#[cfg(feature = "server")]
+pub mod connection;
 /// Logging utils for mqs applications.
 pub mod logger;
 /// Encoding and decoding of multipart/mixed messages.
 pub mod multipart;
 /// Request routing and handling.
 pub mod router;
+/// Run a server with the given handler method.
+#[cfg(feature = "server")]
+pub mod server;
 mod status;
 mod time;
 

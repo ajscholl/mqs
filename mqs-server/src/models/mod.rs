@@ -1,4 +1,4 @@
-use crate::connection::DBConn;
+use mqs_common::connection::DBConn;
 
 pub mod health;
 pub mod message;
@@ -19,16 +19,13 @@ impl PgRepository {
 
 #[cfg(test)]
 pub(crate) mod test {
-    use crate::{
-        connection::Source,
-        models::{
-            health::HealthCheckRepository,
-            message::{Message, MessageInput, MessageRepository},
-            queue::{pg_interval, Queue, QueueDescription, QueueInput, QueueRepository, QueueSource},
-        },
+    use crate::models::{
+        health::HealthCheckRepository,
+        message::{Message, MessageInput, MessageRepository},
+        queue::{pg_interval, Queue, QueueDescription, QueueInput, QueueRepository, QueueSource},
     };
     use diesel::QueryResult;
-    use mqs_common::UtcTime;
+    use mqs_common::{connection::Source, UtcTime};
     use serde::de::StdError;
     use sha2::{Digest, Sha256};
     use std::{

@@ -1,8 +1,10 @@
 use hyper::Method;
-use mqs_common::router::{Router, WildcardRouter};
+use mqs_common::{
+    connection::Source,
+    router::{Router, WildcardRouter},
+};
 
 use crate::{
-    connection::Source,
     models::{health::HealthCheckRepository, message::MessageRepository, queue::QueueRepository},
     router::{
         messages::{DeleteMessageHandler, PublishMessagesHandler, ReceiveMessagesHandler},

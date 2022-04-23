@@ -139,7 +139,7 @@ impl<E: Display> HandleError<E> for ConnectionHandler {
 /// A `Source` can be used to get (potentially) scarce resources like database connections.
 ///
 /// ```
-/// use mqs_server::connection::Source;
+/// use mqs_common::connection::Source;
 ///
 /// #[derive(Debug, PartialEq)]
 /// struct DbConn {}
@@ -165,13 +165,13 @@ mod test {
     use super::*;
 
     #[test]
-    fn database_url() {
+    async fn database_url() {
         env::set_var("DATABASE_URL", "url://database");
         assert_eq!("url://database", &super::database_url().unwrap());
     }
 
     #[test]
-    fn pool() {
+    async fn pool() {
         env::set_var("MAX_POOL_SIZE", "50");
         assert_eq!((50, 50), pool_size().unwrap());
         env::set_var("MIN_POOL_SIZE", "20");

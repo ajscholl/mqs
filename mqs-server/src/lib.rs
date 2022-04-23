@@ -21,8 +21,6 @@ extern crate log;
 #[macro_use]
 extern crate serde_derive;
 
-/// Utilities to connect to the database.
-pub mod connection;
 pub(crate) mod models;
 pub(crate) mod router;
 pub(crate) mod routes;

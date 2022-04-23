@@ -2,11 +2,10 @@ use hyper::{
     header::{HeaderValue, CONTENT_ENCODING, CONTENT_TYPE},
     HeaderMap,
 };
-use mqs_common::{get_header, multipart, Status, TraceIdHeader, DEFAULT_CONTENT_TYPE};
+use mqs_common::{connection::Source, get_header, multipart, Status, TraceIdHeader, DEFAULT_CONTENT_TYPE};
 use uuid::Uuid;
 
 use crate::{
-    connection::Source,
     models::{
         message::{MessageInput, MessageRepository},
         queue::QueueRepository,

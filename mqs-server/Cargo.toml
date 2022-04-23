@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies.mqs-common]
 path = "../mqs-common"
-features = ["diesel"]
+features = ["diesel", "server"]
 
 [dependencies.async-trait]
 version = "0.1.53"
@@ -21,9 +21,6 @@ version = "0.34.0"
 version = "1.4.8"
 features = ["postgres", "uuidv07"]
 
-[dependencies.dotenv]
-version = "0.15.0"
-
 [dependencies.hyper]
 version = "=0.14.18"
 features = ["server", "http1", "http2", "runtime"]
@@ -34,12 +31,6 @@ features = ["rt", "rt-multi-thread", "sync", "net", "time", "signal"]
 
 [dependencies.log]
 version = "0.4.16"
-
-[dependencies.r2d2]
-version = "0.8.9"
-
-[dependencies.r2d2-diesel]
-version = "1.0.0"
 
 [dependencies.sha2]
 version = "0.10.2"

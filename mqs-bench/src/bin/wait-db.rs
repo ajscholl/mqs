@@ -21,8 +21,10 @@ use dotenv::dotenv;
 use log::Level;
 use std::{io::Stdout, thread::sleep, time::Duration};
 
-use mqs_common::logger::{configure_logger, json::Logger, NewJsonLogger};
-use mqs_server::connection::init_pool_maybe;
+use mqs_common::{
+    connection::init_pool_maybe,
+    logger::{configure_logger, json::Logger, NewJsonLogger},
+};
 
 fn main() {
     static LOGGER: Lazy<Logger<Stdout>, NewJsonLogger> = Lazy::new(NewJsonLogger::new(Level::Debug));
