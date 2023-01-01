@@ -25,12 +25,12 @@ pub struct ListQueuesHandler;
 
 #[async_trait]
 impl<R: QueueRepository, S: Send> Handler<(R, S)> for DescribeQueueHandler {
-    async fn handle(&self, (repo, _): (R, S), _req: Request<Body>, _body: Vec<u8>) -> Response<Body>
+    async fn handle(&self, (mut repo, _): (R, S), _req: Request<Body>, _body: Vec<u8>) -> Response<Body>
     where
         R: 'async_trait,
         S: 'async_trait,
     {
-        queues::describe(&repo, &self.queue_name).into_response()
+        queues::describe(&mut repo, &self.queue_name).into_response()
     }
 }
 
@@ -40,13 +40,13 @@ impl<R: QueueRepository, S: Send> Handler<(R, S)> for CreateQueueHandler {
         true
     }
 
-    async fn handle(&self, (repo, _): (R, S), _req: Request<Body>, body: Vec<u8>) -> Response<Body>
+    async fn handle(&self, (mut repo, _): (R, S), _req: Request<Body>, body: Vec<u8>) -> Response<Body>
     where
         R: 'async_trait,
         S: 'async_trait,
     {
         let params = serde_json::from_slice(body.as_slice());
-        queues::new(&repo, &self.queue_name, params).into_response()
+        queues::new(&mut repo, &self.queue_name, params).into_response()
     }
 }
 
@@ -56,34 +56,34 @@ impl<R: QueueRepository, S: Send> Handler<(R, S)> for UpdateQueueHandler {
         true
     }
 
-    async fn handle(&self, (repo, _): (R, S), _req: Request<Body>, body: Vec<u8>) -> Response<Body>
+    async fn handle(&self, (mut repo, _): (R, S), _req: Request<Body>, body: Vec<u8>) -> Response<Body>
     where
         R: 'async_trait,
         S: 'async_trait,
     {
         let params = serde_json::from_slice(body.as_slice());
-        queues::update(&repo, &self.queue_name, params).into_response()
+        queues::update(&mut repo, &self.queue_name, params).into_response()
     }
 }
 
 #[async_trait]
 impl<R: QueueRepository, S: Send> Handler<(R, S)> for DeleteQueueHandler {
-    async fn handle(&self, (repo, _): (R, S), _req: Request<Body>, _body: Vec<u8>) -> Response<Body>
+    async fn handle(&self, (mut repo, _): (R, S), _req: Request<Body>, _body: Vec<u8>) -> Response<Body>
     where
         R: 'async_trait,
         S: 'async_trait,
     {
-        queues::delete(&repo, &self.queue_name).into_response()
+        queues::delete(&mut repo, &self.queue_name).into_response()
     }
 }
 
 #[async_trait]
 impl<R: QueueRepository, S: Send> Handler<(R, S)> for ListQueuesHandler {
-    async fn handle(&self, (repo, _): (R, S), req: Request<Body>, _body: Vec<u8>) -> Response<Body>
+    async fn handle(&self, (mut repo, _): (R, S), req: Request<Body>, _body: Vec<u8>) -> Response<Body>
     where
         R: 'async_trait,
         S: 'async_trait,
     {
-        queues::list(&repo, (&req).try_into()).into_response()
+        queues::list(&mut repo, (&req).try_into()).into_response()
     }
 }

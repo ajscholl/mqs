@@ -72,7 +72,7 @@ mod test {
         make_router,
         models::{
             queue::QueueInput,
-            test::{CloneSource, TestRepo},
+            test::{TestRepo, TestRepoSource},
         },
     };
     use hyper::{Body, Request, Response, StatusCode};
@@ -82,45 +82,48 @@ mod test {
         MessageIdHeader,
         Status,
     };
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
-    fn run_handler<R: Clone + Send>(handler: Arc<dyn Handler<(R, CloneSource<R>)>>, repo: &R) -> Response<Body> {
-        run_handler_with(handler, repo, Vec::new())
+    fn run_handler<'a>(
+        handler: Arc<dyn Handler<(TestRepo, &'a TestRepoSource)>>,
+        source: &'a TestRepoSource,
+    ) -> Response<Body> {
+        run_handler_with(handler, source, Vec::new())
     }
 
-    fn run_handler_with<R: Clone + Send>(
-        handler: Arc<dyn Handler<(R, CloneSource<R>)>>,
-        repo: &R,
+    fn run_handler_with<'a>(
+        handler: Arc<dyn Handler<(TestRepo, &'a TestRepoSource)>>,
+        source: &'a TestRepoSource,
         body: Vec<u8>,
     ) -> Response<Body> {
         let rt = make_runtime();
         rt.block_on(async {
+            let repo = source
+                .get()
+                .expect("The test repo source should always return a repository");
+
             handler
-                .handle(
-                    (repo.clone(), CloneSource::new(&repo)),
-                    Request::new(Body::default()),
-                    body,
-                )
+                .handle((repo, source), Request::new(Body::default()), body)
                 .await
         })
     }
 
     #[test]
     fn health_router() {
-        let repo = Arc::new(Mutex::new(TestRepo::new()));
-        let router = make_router::<Arc<Mutex<TestRepo>>, CloneSource<Arc<Mutex<TestRepo>>>>();
+        let source = TestRepoSource::new();
+        let router = make_router::<TestRepo, &TestRepoSource>();
         let handler = router.route(&Method::GET, vec!["health"].into_iter());
         assert!(handler.is_some());
         let handler = handler.expect("handler should have been found");
         {
-            let mut response = run_handler(handler.clone(), &repo);
+            let mut response = run_handler(Arc::clone(&handler), &source);
             assert_eq!(StatusCode::from(Status::Ok), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(body.as_slice(), b"green");
         }
         {
-            repo.lock().unwrap().set_health(false);
-            let mut response = run_handler(handler, &repo);
+            source.get().unwrap().set_health(false);
+            let mut response = run_handler(handler, &source);
             assert_eq!(StatusCode::from(Status::Ok), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(body.as_slice(), b"red");
@@ -129,15 +132,15 @@ mod test {
 
     #[test]
     fn queues_router() {
-        let repo = Arc::new(Mutex::new(TestRepo::new()));
-        let router = make_router::<Arc<Mutex<TestRepo>>, CloneSource<Arc<Mutex<TestRepo>>>>();
+        let source = TestRepoSource::new();
+        let router = make_router::<TestRepo, &TestRepoSource>();
         let create_handler = router.route(&Method::PUT, vec!["queues", "my-queue"].into_iter());
         assert!(create_handler.is_some());
         let create_handler = create_handler.unwrap();
         {
             let mut response = run_handler_with(
                 create_handler.clone(),
-                &repo,
+                &source,
                 b"{\"retention_timeout\": 600, \"visibility_timeout\": 30, \"message_delay\": 5, \"message_deduplication\": false}".to_vec(),
             );
             assert_eq!(StatusCode::from(Status::Created), response.status());
@@ -150,7 +153,7 @@ mod test {
         {
             let mut response = run_handler_with(
                 create_handler,
-                &repo,
+                &source,
                 b"{\"retention_timeout\": 600, \"visibility_timeout\": 60, \"message_delay\": 5, \"message_deduplication\": false}".to_vec(),
             );
             assert_eq!(StatusCode::from(Status::Conflict), response.status());
@@ -161,7 +164,7 @@ mod test {
         assert!(get_handler.is_some());
         let get_handler = get_handler.unwrap();
         {
-            let mut response = run_handler(get_handler.clone(), &repo);
+            let mut response = run_handler(get_handler.clone(), &source);
             assert_eq!(StatusCode::from(Status::Ok), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(
@@ -174,7 +177,7 @@ mod test {
         assert!(list_handler.is_some());
         let list_handler = list_handler.unwrap();
         {
-            let mut response = run_handler(list_handler, &repo);
+            let mut response = run_handler(list_handler, &source);
             assert_eq!(StatusCode::from(Status::Ok), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(
@@ -189,7 +192,7 @@ mod test {
         {
             let mut response = run_handler_with(
                 update_handler,
-                &repo,
+                &source,
                 b"{\"retention_timeout\": 30, \"visibility_timeout\": 10, \"message_delay\": 2, \"message_deduplication\": true}".to_vec(),
             );
             assert_eq!(StatusCode::from(Status::Ok), response.status());
@@ -203,7 +206,7 @@ mod test {
         assert!(delete_handler.is_some());
         let delete_handler = delete_handler.unwrap();
         {
-            let mut response = run_handler(delete_handler, &repo);
+            let mut response = run_handler(delete_handler, &source);
             assert_eq!(StatusCode::from(Status::Ok), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(
@@ -212,7 +215,7 @@ mod test {
             );
         }
         {
-            let mut response = run_handler(get_handler, &repo);
+            let mut response = run_handler(get_handler, &source);
             assert_eq!(StatusCode::from(Status::NotFound), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(body.len(), 0);
@@ -221,24 +224,27 @@ mod test {
 
     #[test]
     fn messages_router() {
-        let repo = Arc::new(Mutex::new(TestRepo::new()));
-        repo.insert_queue(&QueueInput {
-            name:                        "my-queue",
-            max_receives:                None,
-            dead_letter_queue:           None,
-            retention_timeout:           100,
-            visibility_timeout:          10,
-            message_delay:               0,
-            content_based_deduplication: false,
-        })
-        .unwrap()
-        .unwrap();
-        let router = make_router::<Arc<Mutex<TestRepo>>, CloneSource<Arc<Mutex<TestRepo>>>>();
+        let source = TestRepoSource::new();
+        source
+            .get()
+            .unwrap()
+            .insert_queue(&QueueInput {
+                name:                        "my-queue",
+                max_receives:                None,
+                dead_letter_queue:           None,
+                retention_timeout:           100,
+                visibility_timeout:          10,
+                message_delay:               0,
+                content_based_deduplication: false,
+            })
+            .unwrap()
+            .unwrap();
+        let router = make_router::<TestRepo, &TestRepoSource>();
         let publish_handler = router.route(&Method::POST, vec!["messages", "my-queue"].into_iter());
         assert!(publish_handler.is_some());
         let publish_handler = publish_handler.unwrap();
         {
-            let mut response = run_handler_with(publish_handler, &repo, b"{\"content\": \"my message\"}".to_vec());
+            let mut response = run_handler_with(publish_handler, &source, b"{\"content\": \"my message\"}".to_vec());
             assert_eq!(StatusCode::from(Status::Created), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(body.len(), 0);
@@ -247,7 +253,7 @@ mod test {
         assert!(receive_handler.is_some());
         let receive_handler = receive_handler.unwrap();
         let message_id = {
-            let mut response = run_handler(receive_handler, &repo);
+            let mut response = run_handler(receive_handler, &source);
             assert_eq!(StatusCode::from(Status::Ok), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(body.as_slice(), b"{\"content\": \"my message\"}");
@@ -259,7 +265,7 @@ mod test {
             let delete_handler = router.route(&Method::DELETE, vec!["messages", &message_id].into_iter());
             assert!(delete_handler.is_some());
             let delete_handler = delete_handler.unwrap();
-            let mut response = run_handler(delete_handler, &repo);
+            let mut response = run_handler(delete_handler, &source);
             assert_eq!(StatusCode::from(Status::Ok), response.status());
             let body = read_body(response.body_mut());
             assert_eq!(body.len(), 0);

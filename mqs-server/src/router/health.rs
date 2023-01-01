@@ -8,7 +8,7 @@ pub struct Handler;
 
 #[async_trait]
 impl<R: HealthCheckRepository, S: Send> router::Handler<(R, S)> for Handler {
-    async fn handle(&self, (repo, _): (R, S), _req: Request<Body>, _body: Vec<u8>) -> Response<Body>
+    async fn handle(&self, (mut repo, _): (R, S), _req: Request<Body>, _body: Vec<u8>) -> Response<Body>
     where
         R: 'async_trait,
         S: 'async_trait,

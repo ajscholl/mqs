@@ -71,7 +71,7 @@ impl<W: Write> Logger<W> {
     /// let logger = Logger::new(Level::Info, stdout());
     /// assert_eq!(logger.level(), Level::Info);
     /// ```
-    pub fn level(&self) -> Level {
+    pub const fn level(&self) -> Level {
         self.level
     }
 

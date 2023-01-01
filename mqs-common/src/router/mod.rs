@@ -57,12 +57,9 @@ impl<A> Router<A> {
         method: &Method,
         mut segments: I,
     ) -> Option<Arc<dyn Handler<A>>> {
-        match segments.next() {
-            None => match self.handler.get(method) {
-                None => None,
-                Some(handler) => Some(handler.clone()),
-            },
-            Some(segment) => {
+        segments.next().map_or_else(
+            || self.handler.get(method).map(Arc::clone),
+            |segment| {
                 if segment.is_empty() {
                     self.route(method, segments)
                 } else if let Some(sub) = self.sub_router.get(segment) {
@@ -73,7 +70,7 @@ impl<A> Router<A> {
                     None
                 }
             },
-        }
+        )
     }
 
     /// Create a new router with a single handler registered on the root path for the given method.

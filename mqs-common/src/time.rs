@@ -1,33 +1,36 @@
 use ::time::{error::ComponentRange, Date, Month, PrimitiveDateTime, Time};
+#[cfg(feature = "diesel")]
+use byteorder::{NetworkEndian, WriteBytesExt};
 use cached::once_cell::sync::Lazy;
 #[cfg(feature = "diesel")]
 use diesel::{
     data_types::{PgInterval, PgTimestamp},
     deserialize::FromSql,
-    expression::NonAggregate,
+    expression::ValidGrouping,
     pg::Pg,
+    pg::PgValue,
+    serialize::IsNull,
     serialize::{Output, ToSql},
     sql_types::{Timestamp, Timestamptz},
     AsExpression,
     FromSqlRow,
     QueryId,
 };
+#[cfg(feature = "diesel")]
+use std::num::TryFromIntError;
 use std::{
     convert::TryFrom,
     error::Error,
     fmt::{Display, Formatter},
-    io::Write,
-    num::{ParseIntError, TryFromIntError},
+    num::ParseIntError,
     ops::{Add, Sub},
     time::{Duration, SystemTime},
 };
 
 /// A `UtcTime` represents a timestamp in the UTC timezone.
 #[derive(Clone, Copy, Hash, Eq, PartialEq, Ord, PartialOrd, Debug, Deserialize, Serialize)]
-#[cfg(feature = "diesel")]
-#[derive(AsExpression, FromSqlRow, QueryId)]
-#[cfg(feature = "diesel")]
-#[sql_type = "Timestamp"]
+#[cfg_attr(feature = "diesel", derive(AsExpression, FromSqlRow, QueryId, ValidGrouping))]
+#[cfg_attr(feature = "diesel", diesel(sql_type = Timestamp))]
 pub struct UtcTime {
     time: PrimitiveDateTime,
 }
@@ -122,14 +125,14 @@ impl UtcTime {
     /// ```
     #[must_use]
     pub fn from_timestamp(epoch: i64) -> Self {
-        match u64::try_from(epoch) {
-            Err(_) => Self {
+        u64::try_from(epoch).map_or_else(
+            |_| Self {
                 time: UNIX_EPOCH.sub(Duration::from_secs(u64::try_from(epoch.abs()).unwrap())),
             },
-            Ok(epoch_seconds) => Self {
+            |epoch_seconds| Self {
                 time: UNIX_EPOCH.add(Duration::from_secs(epoch_seconds)),
             },
-        }
+        )
     }
 
     /// `parse_from_rfc3339` is the inverse of `to_rfc3339` and `to_rfc3339_nanos`. It parses a UTC timestamp
@@ -140,7 +143,10 @@ impl UtcTime {
     ///
     /// let time = UtcTime::now();
     ///
-    /// assert_eq!(Ok(time), UtcTime::parse_from_rfc3339(&time.to_rfc3339_nanos()));
+    /// assert_eq!(
+    ///     Ok(time),
+    ///     UtcTime::parse_from_rfc3339(&time.to_rfc3339_nanos())
+    /// );
     /// ```
     pub fn parse_from_rfc3339(s: &str) -> Result<Self, UtcTimeParseError> {
         const SECOND_PRECISION: usize = "YYYY-MM-DDTHH:ii:ssZ".len();
@@ -192,16 +198,16 @@ impl UtcTime {
     }
 
     fn expect_char(s: &str, position: usize, expected: char) -> Result<(), UtcTimeParseError> {
-        match s[position..].chars().next() {
-            None => Err(UtcTimeParseError::InvalidLengthError(s.len())),
-            Some(c) => {
+        s[position..]
+            .chars()
+            .next()
+            .map_or(Err(UtcTimeParseError::InvalidLengthError(s.len())), |c| {
                 if c == expected {
                     Ok(())
                 } else {
                     Err(UtcTimeParseError::UnexpectedCharacter(c, expected, position))
                 }
-            },
-        }
+            })
     }
 
     /// Format a timestamp according to RFC3339 with second precision.
@@ -258,7 +264,10 @@ impl UtcTime {
     /// use std::time::Duration;
     ///
     /// let time = UtcTime::from_timestamp(1000);
-    /// assert_eq!(UtcTime::from_timestamp(1500), time.add(Duration::from_secs(500)));
+    /// assert_eq!(
+    ///     UtcTime::from_timestamp(1500),
+    ///     time.add(Duration::from_secs(500))
+    /// );
     /// ```
     #[must_use]
     pub fn add(&self, d: Duration) -> Self {
@@ -272,7 +281,10 @@ impl UtcTime {
     /// use std::time::Duration;
     ///
     /// let time = UtcTime::from_timestamp(1000);
-    /// assert_eq!(UtcTime::from_timestamp(500), time.sub(Duration::from_secs(500)));
+    /// assert_eq!(
+    ///     UtcTime::from_timestamp(500),
+    ///     time.sub(Duration::from_secs(500))
+    /// );
     /// ```
     #[must_use]
     pub fn sub(&self, d: Duration) -> Self {
@@ -323,7 +335,7 @@ impl Error for UtcTimeSqlConversionError {}
 
 #[cfg(feature = "diesel")]
 impl FromSql<Timestamp, Pg> for UtcTime {
-    fn from_sql(bytes: Option<&[u8]>) -> diesel::deserialize::Result<Self> {
+    fn from_sql(bytes: PgValue<'_>) -> diesel::deserialize::Result<Self> {
         let PgTimestamp(offset) = FromSql::<Timestamp, Pg>::from_sql(bytes)?;
         match u64::try_from(offset) {
             Err(_) => {
@@ -337,28 +349,28 @@ impl FromSql<Timestamp, Pg> for UtcTime {
 
 #[cfg(feature = "diesel")]
 impl ToSql<Timestamp, Pg> for UtcTime {
-    fn to_sql<'a, W: Write>(&self, out: &mut Output<'a, W, Pg>) -> diesel::serialize::Result {
+    fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> diesel::serialize::Result {
         let time = self.since_pg_epoch_micros().map_err(UtcTimeSqlConversionError)?;
-        ToSql::<Timestamp, Pg>::to_sql(&PgTimestamp(time), out)
+
+        out.write_i64::<NetworkEndian>(time)
+            .map(|_| IsNull::No)
+            .map_err(|e| Box::new(e) as Box<_>)
     }
 }
 
 #[cfg(feature = "diesel")]
 impl FromSql<Timestamptz, Pg> for UtcTime {
-    fn from_sql(bytes: Option<&[u8]>) -> diesel::deserialize::Result<Self> {
+    fn from_sql(bytes: PgValue<'_>) -> diesel::deserialize::Result<Self> {
         FromSql::<Timestamp, Pg>::from_sql(bytes)
     }
 }
 
 #[cfg(feature = "diesel")]
 impl ToSql<Timestamptz, Pg> for UtcTime {
-    fn to_sql<'a, W: Write>(&self, out: &mut Output<'a, W, Pg>) -> diesel::serialize::Result {
+    fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, Pg>) -> diesel::serialize::Result {
         ToSql::<Timestamp, Pg>::to_sql(self, out)
     }
 }
-
-#[cfg(feature = "diesel")]
-impl NonAggregate for UtcTime {}
 
 // Postgres timestamps start from January 1st 2000.
 #[cfg(feature = "diesel")]
@@ -379,7 +391,8 @@ impl UtcTime {
     /// use mqs_common::UtcTime;
     ///
     /// let interval = PgInterval::new(1000000, 1, 1);
-    /// let time = UtcTime::parse_from_rfc3339("2020-01-01T00:00:00Z").expect("Should parse for this test");
+    /// let time =
+    ///     UtcTime::parse_from_rfc3339("2020-01-01T00:00:00Z").expect("Should parse for this test");
     /// let result = time.add_pg_interval(&interval);
     ///
     /// assert_eq!(result.to_rfc3339(), "2020-02-01T00:00:01Z");
@@ -387,10 +400,10 @@ impl UtcTime {
     #[must_use]
     pub fn add_pg_interval(&self, offset: &PgInterval) -> Self {
         let micros = offset.microseconds + 1_000_000 * 3600 * 24 * i64::from(offset.days + offset.months * 30);
-        match u64::try_from(micros) {
-            Err(_) => self.sub(Duration::from_micros(u64::try_from(micros.abs()).unwrap())),
-            Ok(micros) => self.add(Duration::from_micros(micros)),
-        }
+        u64::try_from(micros).map_or_else(
+            |_| self.sub(Duration::from_micros(u64::try_from(micros.abs()).unwrap())),
+            |micros| self.add(Duration::from_micros(micros)),
+        )
     }
 
     fn since_pg_epoch_micros(&self) -> Result<i64, TryFromIntError> {

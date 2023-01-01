@@ -9,8 +9,8 @@ use uuid::Uuid;
 #[derive(Eq, PartialEq, Debug)]
 pub enum ParsedArgs {
     ShowHelp(Option<String>),
-    ShowCommandHelp(Option<String>, Command),
-    RunCommand(String, u16, Option<Uuid>, Command),
+    ShowCommandHelp(Option<String>, Box<Command>),
+    RunCommand(String, u16, Option<Uuid>, Box<Command>),
 }
 
 #[derive(Eq, PartialEq, Debug, Clone)]
@@ -65,7 +65,7 @@ fn parse_args<R: Read>(input: &mut R, args: Vec<String>) -> ParsedArgs {
         Err(msg) => ParsedArgs::ShowHelp(msg),
         Ok(opts) => match parse_cmd(input, opts.remaining_args) {
             Err(result) => result,
-            Ok(cmd) => ParsedArgs::RunCommand(opts.host, opts.port, opts.trace_id, cmd),
+            Ok(cmd) => ParsedArgs::RunCommand(opts.host, opts.port, opts.trace_id, Box::new(cmd)),
         },
     }
 }
@@ -142,45 +142,35 @@ fn parse_top_options(mut args: Vec<String>) -> Result<TopOptions, Option<String>
 }
 
 fn parse_cmd<R: Read>(input: &mut R, mut args: Vec<String>) -> Result<Command, ParsedArgs> {
-    match args.pop() {
-        None => Err(ParsedArgs::ShowHelp(None)),
-        Some(cmd) => {
-            let s: &str = &cmd;
-            match s {
-                "queue" => parse_queue_cmd(args),
-                "message" => parse_message_cmd(input, args),
-                "help" => Err(ParsedArgs::ShowHelp(None)),
-                _ => Err(ParsedArgs::ShowHelp(Some(format!("Unrecognized command {}", cmd)))),
-            }
-        },
-    }
+    args.pop().map_or(Err(ParsedArgs::ShowHelp(None)), |cmd| {
+        let s: &str = &cmd;
+        match s {
+            "queue" => parse_queue_cmd(args),
+            "message" => parse_message_cmd(input, args),
+            "help" => Err(ParsedArgs::ShowHelp(None)),
+            _ => Err(ParsedArgs::ShowHelp(Some(format!("Unrecognized command {}", cmd)))),
+        }
+    })
 }
 
 fn parse_queue_cmd(mut args: Vec<String>) -> Result<Command, ParsedArgs> {
-    match args.pop() {
-        None => Err(ParsedArgs::ShowHelp(None)),
-        Some(sub_cmd) => {
-            let s: &str = &sub_cmd;
-            match s {
-                "create" => {
-                    parse_queue_name_and_config(args, Command::CreateQueue(String::new(), empty_queue_config()))
-                        .map(|(queue_name, queue_config)| Command::CreateQueue(queue_name, queue_config))
-                },
-                "update" => {
-                    parse_queue_name_and_config(args, Command::UpdateQueue(String::new(), empty_queue_config()))
-                        .map(|(queue_name, queue_config)| Command::UpdateQueue(queue_name, queue_config))
-                },
-                "delete" => parse_queue_name(args, Command::DeleteQueue(String::new())).map(Command::DeleteQueue),
-                "list" => parse_limit_offset(args).map(|(offset, limit)| Command::ListQueues(offset, limit)),
-                "describe" => parse_queue_name(args, Command::DescribeQueue(String::new())).map(Command::DescribeQueue),
-                "help" => Err(ParsedArgs::ShowHelp(None)),
-                _ => Err(ParsedArgs::ShowHelp(Some(format!(
-                    "Unrecognized queue subcommand {}",
-                    sub_cmd
-                )))),
-            }
-        },
-    }
+    args.pop().map_or(Err(ParsedArgs::ShowHelp(None)), |sub_cmd| {
+        let s: &str = &sub_cmd;
+        match s {
+            "create" => parse_queue_name_and_config(args, Command::CreateQueue(String::new(), empty_queue_config()))
+                .map(|(queue_name, queue_config)| Command::CreateQueue(queue_name, queue_config)),
+            "update" => parse_queue_name_and_config(args, Command::UpdateQueue(String::new(), empty_queue_config()))
+                .map(|(queue_name, queue_config)| Command::UpdateQueue(queue_name, queue_config)),
+            "delete" => parse_queue_name(args, Command::DeleteQueue(String::new())).map(Command::DeleteQueue),
+            "list" => parse_limit_offset(args).map(|(offset, limit)| Command::ListQueues(offset, limit)),
+            "describe" => parse_queue_name(args, Command::DescribeQueue(String::new())).map(Command::DescribeQueue),
+            "help" => Err(ParsedArgs::ShowHelp(None)),
+            _ => Err(ParsedArgs::ShowHelp(Some(format!(
+                "Unrecognized queue subcommand {}",
+                sub_cmd
+            )))),
+        }
+    })
 }
 
 const fn empty_queue_config() -> QueueConfig {
@@ -202,30 +192,27 @@ const fn empty_owned_publishable_message() -> OwnedPublishableMessage {
 }
 
 fn parse_message_cmd<R: Read>(input: &mut R, mut args: Vec<String>) -> Result<Command, ParsedArgs> {
-    match args.pop() {
-        None => Err(ParsedArgs::ShowHelp(None)),
-        Some(sub_cmd) => {
-            let s: &str = &sub_cmd;
-            match s {
-                "receive" => parse_queue_limit_and_timeout(args).map(|(queue, limit, timeout)| {
-                    if limit == 1 {
-                        Command::ReceiveMessage(queue, timeout)
-                    } else {
-                        Command::ReceiveMessages(queue, limit, timeout)
-                    }
-                }),
-                "publish" => {
-                    parse_queue_and_message(input, args).map(|(queue, message)| Command::PublishMessage(queue, message))
-                },
-                "delete" => parse_message_id(args).map(Command::DeleteMessage),
-                "help" => Err(ParsedArgs::ShowHelp(None)),
-                _ => Err(ParsedArgs::ShowHelp(Some(format!(
-                    "Unrecognized message subcommand {}",
-                    sub_cmd
-                )))),
-            }
-        },
-    }
+    args.pop().map_or(Err(ParsedArgs::ShowHelp(None)), |sub_cmd| {
+        let s: &str = &sub_cmd;
+        match s {
+            "receive" => parse_queue_limit_and_timeout(args).map(|(queue, limit, timeout)| {
+                if limit == 1 {
+                    Command::ReceiveMessage(queue, timeout)
+                } else {
+                    Command::ReceiveMessages(queue, limit, timeout)
+                }
+            }),
+            "publish" => {
+                parse_queue_and_message(input, args).map(|(queue, message)| Command::PublishMessage(queue, message))
+            },
+            "delete" => parse_message_id(args).map(Command::DeleteMessage),
+            "help" => Err(ParsedArgs::ShowHelp(None)),
+            _ => Err(ParsedArgs::ShowHelp(Some(format!(
+                "Unrecognized message subcommand {}",
+                sub_cmd
+            )))),
+        }
+    })
 }
 
 fn parse_single_arg_string(
@@ -234,7 +221,12 @@ fn parse_single_arg_string(
     error_msg: &'static str,
 ) -> Result<String, ParsedArgs> {
     args.pop().map_or_else(
-        || Err(ParsedArgs::ShowCommandHelp(Some(error_msg.to_string()), cmd.clone())),
+        || {
+            Err(ParsedArgs::ShowCommandHelp(
+                Some(error_msg.to_string()),
+                Box::new(cmd.clone()),
+            ))
+        },
         Ok,
     )
 }
@@ -247,7 +239,7 @@ fn parse_single_arg<T: FromStr, F: FnOnce(&str, <T as FromStr>::Err) -> String>(
 ) -> Result<T, ParsedArgs> {
     let val = parse_single_arg_string(args, cmd, missing_error_msg)?;
     val.parse()
-        .map_err(|err| ParsedArgs::ShowCommandHelp(Some(mk_parse_error(&val, err)), cmd.clone()))
+        .map_err(|err| ParsedArgs::ShowCommandHelp(Some(mk_parse_error(&val, err)), Box::new(cmd.clone())))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -318,12 +310,12 @@ fn parse_queue_name_and_config(mut args: Vec<String>, cmd: Command) -> Result<(S
                 )?;
             },
             "help" | "--help" => {
-                return Err(ParsedArgs::ShowCommandHelp(None, cmd));
+                return Err(ParsedArgs::ShowCommandHelp(None, Box::new(cmd)));
             },
             _ => {
                 return Err(ParsedArgs::ShowCommandHelp(
                     Some(format!("Unrecognized argument {}", arg)),
-                    cmd,
+                    Box::new(cmd),
                 ));
             },
         }
@@ -334,7 +326,7 @@ fn parse_queue_name_and_config(mut args: Vec<String>, cmd: Command) -> Result<(S
     } else {
         return Err(ParsedArgs::ShowCommandHelp(
             Some("You have to specify a queue. You can use --queue-name [QUEUE] to specify one.".to_string()),
-            cmd,
+            Box::new(cmd),
         ));
     };
 
@@ -347,13 +339,13 @@ fn parse_queue_name_and_config(mut args: Vec<String>, cmd: Command) -> Result<(S
         } else {
             return Err(ParsedArgs::ShowCommandHelp(
                 Some("You have to specify the dead letter queue if you specify a maximum number of receives. You can use --dead-letter-queue [QUEUE] to specify it.".to_string()),
-                cmd,
+                Box::new(cmd),
             ));
         }
     } else if dead_letter_queue.is_some() {
         return Err(ParsedArgs::ShowCommandHelp(
             Some("You have to specify the maximum number of receives if you specify a dead letter queue. You can use --max-receives [NUMBER] to specify it.".to_string()),
-            cmd,
+            Box::new(cmd),
         ));
     } else {
         None
@@ -367,7 +359,7 @@ fn parse_queue_name_and_config(mut args: Vec<String>, cmd: Command) -> Result<(S
                 "You have to specify the retention timeout. You can use --retention-timeout [SECONDS] to specify it."
                     .to_string(),
             ),
-            cmd,
+            Box::new(cmd),
         ));
     };
 
@@ -379,7 +371,7 @@ fn parse_queue_name_and_config(mut args: Vec<String>, cmd: Command) -> Result<(S
                 "You have to specify the visibility timeout. You can use --visibility-timeout [SECONDS] to specify it."
                     .to_string(),
             ),
-            cmd,
+            Box::new(cmd),
         ));
     };
 
@@ -417,12 +409,12 @@ fn parse_limit_offset(mut args: Vec<String>) -> Result<(Option<usize>, Option<us
                 )?);
             },
             "help" | "--help" => {
-                return Err(ParsedArgs::ShowCommandHelp(None, cmd));
+                return Err(ParsedArgs::ShowCommandHelp(None, Box::new(cmd)));
             },
             _ => {
                 return Err(ParsedArgs::ShowCommandHelp(
                     Some(format!("Unrecognized argument {}", arg)),
-                    cmd,
+                    Box::new(cmd),
                 ));
             },
         }
@@ -445,12 +437,12 @@ fn parse_queue_name(mut args: Vec<String>, cmd: Command) -> Result<String, Parse
                 )?);
             },
             "help" | "--help" => {
-                return Err(ParsedArgs::ShowCommandHelp(None, cmd));
+                return Err(ParsedArgs::ShowCommandHelp(None, Box::new(cmd)));
             },
             _ => {
                 return Err(ParsedArgs::ShowCommandHelp(
                     Some(format!("Unrecognized argument {}", arg)),
-                    cmd,
+                    Box::new(cmd),
                 ));
             },
         }
@@ -461,7 +453,7 @@ fn parse_queue_name(mut args: Vec<String>, cmd: Command) -> Result<String, Parse
     } else {
         return Err(ParsedArgs::ShowCommandHelp(
             Some("You have to specify a queue. You can use --queue-name [QUEUE] to specify one.".to_string()),
-            cmd,
+            Box::new(cmd),
         ));
     };
 
@@ -506,12 +498,12 @@ fn parse_queue_limit_and_timeout(mut args: Vec<String>) -> Result<(String, u16, 
                 )?);
             },
             "help" | "--help" => {
-                return Err(ParsedArgs::ShowCommandHelp(None, cmd));
+                return Err(ParsedArgs::ShowCommandHelp(None, Box::new(cmd)));
             },
             _ => {
                 return Err(ParsedArgs::ShowCommandHelp(
                     Some(format!("Unrecognized argument {}", arg)),
-                    cmd,
+                    Box::new(cmd),
                 ));
             },
         }
@@ -522,7 +514,7 @@ fn parse_queue_limit_and_timeout(mut args: Vec<String>) -> Result<(String, u16, 
     } else {
         return Err(ParsedArgs::ShowCommandHelp(
             Some("You have to specify a queue. You can use --queue-name [QUEUE] to specify one.".to_string()),
-            cmd,
+            Box::new(cmd),
         ));
     };
 
@@ -563,12 +555,12 @@ fn parse_queue_and_message<R: Read>(
                 )?);
             },
             "help" | "--help" => {
-                return Err(ParsedArgs::ShowCommandHelp(None, cmd));
+                return Err(ParsedArgs::ShowCommandHelp(None, Box::new(cmd)));
             },
             _ => {
                 return Err(ParsedArgs::ShowCommandHelp(
                     Some(format!("Unrecognized argument {}", arg)),
-                    cmd,
+                    Box::new(cmd),
                 ));
             },
         }
@@ -579,7 +571,7 @@ fn parse_queue_and_message<R: Read>(
     } else {
         return Err(ParsedArgs::ShowCommandHelp(
             Some("You have to specify a queue. You can use --queue-name [QUEUE] to specify one.".to_string()),
-            cmd,
+            Box::new(cmd),
         ));
     };
 
@@ -591,14 +583,17 @@ fn parse_queue_and_message<R: Read>(
                 "You have to specify the content type. You can use --content-type [CONTENT TYPE] to specify it."
                     .to_string(),
             ),
-            cmd,
+            Box::new(cmd),
         ));
     };
 
     let mut message = Vec::new();
-    input
-        .read_to_end(&mut message)
-        .map_err(|err| ParsedArgs::ShowCommandHelp(Some(format!("Failed to read message from stdin: {}", err)), cmd))?;
+    input.read_to_end(&mut message).map_err(|err| {
+        ParsedArgs::ShowCommandHelp(
+            Some(format!("Failed to read message from stdin: {}", err)),
+            Box::new(cmd),
+        )
+    })?;
 
     Ok((queue_name, OwnedPublishableMessage {
         content_type,
@@ -622,12 +617,12 @@ fn parse_message_id(mut args: Vec<String>) -> Result<String, ParsedArgs> {
                 )?);
             },
             "help" | "--help" => {
-                return Err(ParsedArgs::ShowCommandHelp(None, cmd));
+                return Err(ParsedArgs::ShowCommandHelp(None, Box::new(cmd)));
             },
             _ => {
                 return Err(ParsedArgs::ShowCommandHelp(
                     Some(format!("Unrecognized argument {}", arg)),
-                    cmd,
+                    Box::new(cmd),
                 ));
             },
         }
@@ -640,7 +635,7 @@ fn parse_message_id(mut args: Vec<String>) -> Result<String, ParsedArgs> {
             Some(
                 "You have to specify the message id. You can use --message-id [MESSAGE ID] to specify it.".to_string(),
             ),
-            cmd,
+            Box::new(cmd),
         ));
     };
 
@@ -657,15 +652,15 @@ mod test {
     }
 
     fn mk_show_command_help(cmd: &Command) -> ParsedArgs {
-        ShowCommandHelp(None, cmd.clone())
+        ShowCommandHelp(None, Box::new(cmd.clone()))
     }
 
     fn mk_show_command_help_with_message(s: &str, cmd: &Command) -> ParsedArgs {
-        ShowCommandHelp(Some(s.to_string()), cmd.clone())
+        ShowCommandHelp(Some(s.to_string()), Box::new(cmd.clone()))
     }
 
     fn mk_run_command(cmd: Command) -> ParsedArgs {
-        RunCommand("localhost".to_string(), 7843, None, cmd)
+        RunCommand("localhost".to_string(), 7843, None, Box::new(cmd))
     }
 
     struct TestCase {
@@ -709,7 +704,7 @@ mod test {
             no_input(vec!["--port", "1234"], ShowHelp(None)),
             no_input(vec!["--port", "1234", "--help"], ShowHelp(None)),
             no_input(vec!["--trace-id", "4aa662d5-b5c9-4f1c-b4ce-09e7ca6c57a5"], ShowHelp(None)),
-            no_input(vec!["--trace-id", "not a uuid"], mk_show_help("Failed to parse not a uuid as trace id: invalid length: expected one of [36, 32], found 10")),
+            no_input(vec!["--trace-id", "not a uuid"], mk_show_help("Failed to parse not a uuid as trace id: invalid character: expected an optional prefix of `urn:uuid:` followed by [0-9a-zA-Z], found `n` at 1")),
             no_input(vec!["--trace-id", "4aa662d5-b5c9-4f1c-b4ce-09e7ca6c57a5", "--help"], ShowHelp(None)),
             no_input(vec!["queue", "help"], ShowHelp(None)),
             no_input(vec!["message", "help"], ShowHelp(None)),

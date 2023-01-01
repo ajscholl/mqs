@@ -21,7 +21,7 @@ fn boundary_from_headers(headers: &HeaderMap<HeaderValue>) -> Option<String> {
 }
 
 pub async fn publish<R: QueueRepository + MessageRepository>(
-    repo: R,
+    mut repo: R,
     queue_name: &str,
     message_content: &[u8],
     headers: HeaderMap<HeaderValue>,
@@ -89,7 +89,7 @@ pub struct MessageCount(pub i64);
 pub struct MaxWaitTime(pub u64);
 
 pub async fn receive<R: QueueRepository + MessageRepository, S: Source<R>>(
-    repo: R,
+    mut repo: R,
     repo_source: S,
     queue_name: &str,
     message_count: Result<MessageCount, ()>,
@@ -133,7 +133,7 @@ pub async fn receive<R: QueueRepository + MessageRepository, S: Source<R>>(
                 None => {
                     warn!("Failed to get second database connection");
                 },
-                Some(repo) => match repo.get_message_from_queue(&queue, count.0) {
+                Some(mut repo) => match repo.get_message_from_queue(&queue, count.0) {
                     Ok(new_messages) => {
                         messages = new_messages;
                     },
@@ -152,10 +152,10 @@ pub async fn receive<R: QueueRepository + MessageRepository, S: Source<R>>(
     }
 }
 
-pub fn delete<R: MessageRepository>(repo: &R, message_id: &str) -> MqsResponse {
-    match Uuid::parse_str(message_id) {
-        Err(_) => MqsResponse::error_static("Message ID needs to be a UUID"),
-        Ok(id) => {
+pub fn delete<R: MessageRepository>(repo: &mut R, message_id: &str) -> MqsResponse {
+    Uuid::parse_str(message_id).map_or_else(
+        |_| MqsResponse::error_static("Message ID needs to be a UUID"),
+        |id| {
             info!("Deleting message {}", id);
             let deleted = repo.delete_message_by_id(id);
             match deleted {
@@ -173,5 +173,5 @@ pub fn delete<R: MessageRepository>(repo: &R, message_id: &str) -> MqsResponse {
                 },
             }
         },
-    }
+    )
 }

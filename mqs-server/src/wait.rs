@@ -34,7 +34,7 @@ impl MessageWaitQueue {
                 id.to_string()
             );
             let mut guard = self.wait_queue.lock().await;
-            let map: &mut MessageWaitQueueMap = &mut *guard;
+            let map: &mut MessageWaitQueueMap = &mut guard;
             match map.get_mut(&queue_name) {
                 None => {
                     let mut waiting = HashMap::new();
@@ -58,26 +58,29 @@ impl MessageWaitQueue {
 
         {
             let mut guard = self.wait_queue.lock().await;
-            let map: &mut MessageWaitQueueMap = &mut *guard;
-            match map.get_mut(&queue_name) {
-                None => {
+            let map: &mut MessageWaitQueueMap = &mut guard;
+            let remove_queue = map.get_mut(&queue_name).map_or_else(
+                || {
                     error!(
                         "Someone else removed our queue {} from the waiting map (id {})",
                         &queue_name,
                         id.to_string()
                     );
+
+                    false
                 },
-                Some(waiting) => {
+                |waiting| {
                     waiting.remove(&id);
-                    if waiting.is_empty() {
-                        map.remove(&queue_name);
-                        debug!(
-                            "Removing waiting entries for queue {}: It is empty (id {})",
-                            &queue_name,
-                            id.to_string()
-                        );
-                    }
+                    waiting.is_empty()
                 },
+            );
+            if remove_queue {
+                map.remove(&queue_name);
+                debug!(
+                    "Removing waiting entries for queue {}: It is empty (id {})",
+                    &queue_name,
+                    id.to_string()
+                );
             }
         }
 
@@ -86,12 +89,12 @@ impl MessageWaitQueue {
 
     pub async fn signal(&self, queue: &Queue) {
         let mut guard = self.wait_queue.lock().await;
-        let map: &mut MessageWaitQueueMap = &mut *guard;
-        match map.get_mut(&queue.name.to_string()) {
-            None => {
+        let map: &mut MessageWaitQueueMap = &mut guard;
+        map.get_mut(&queue.name.to_string()).map_or_else(
+            || {
                 debug!("Not signaling on queue {}: No waiting entries", &queue.name);
             },
-            Some(waiting) => {
+            |waiting| {
                 let key = waiting.keys().next().map_or_else(|| None, |k| Some(*k));
                 if let Some(key) = key {
                     if let Some(value) = waiting.remove(&key) {
@@ -110,7 +113,7 @@ impl MessageWaitQueue {
                     }
                 }
             },
-        }
+        );
     }
 }
 

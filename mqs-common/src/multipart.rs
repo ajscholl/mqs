@@ -38,7 +38,10 @@ pub fn encode<I: Iterator<Item = (HeaderMap, Vec<u8>)>>(messages: I) -> (String,
 /// ```
 /// use mqs_common::multipart::is_multipart;
 ///
-/// assert_eq!(is_multipart("multipart/mixed; boundary=abc"), Some("--abc".to_string()));
+/// assert_eq!(
+///     is_multipart("multipart/mixed; boundary=abc"),
+///     Some("--abc".to_string())
+/// );
 /// assert_eq!(
 ///     is_multipart("multipart/mixed; boundary=\"abc def\""),
 ///     Some("--abc def".to_string())
@@ -196,7 +199,7 @@ impl<'a, 'b, M: Matcher + ?Sized> Iterator for Split<'a, 'b, M> {
     }
 }
 
-fn split<'a, 'b, M: Matcher + ?Sized>(data: &'a [u8], split_by: &'b M) -> Split<'a, 'b, M> {
+const fn split<'a, 'b, M: Matcher + ?Sized>(data: &'a [u8], split_by: &'b M) -> Split<'a, 'b, M> {
     Split {
         data: Some(data),
         split_by,
@@ -283,7 +286,7 @@ impl<'a> Matcher for Boundary<'a> {
     }
 
     fn does_match(&self, data: &[u8]) -> Option<usize> {
-        if !data.starts_with(b"\r\n") || !(&data[2..]).starts_with(self.boundary) {
+        if !data.starts_with(b"\r\n") || !data[2..].starts_with(self.boundary) {
             return None;
         }
 

@@ -60,13 +60,10 @@ impl HandlerService {
 #[async_trait]
 impl ServerHandler for HandlerService {
     async fn handle(&self, req: Request<Body>) -> Response<Body> {
-        let repo = match self.pool.get() {
-            Err(_) => None,
-            Ok(conn) => Some(PgRepository::new(conn)),
-        };
+        let repo = self.pool.get().ok().map(PgRepository::new);
         handle(
             repo,
-            RepoSource::new(self.pool.clone()),
+            RepoSource::new(Arc::clone(&self.pool)),
             &self.router,
             self.max_message_size,
             req,

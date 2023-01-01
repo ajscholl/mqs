@@ -12,6 +12,7 @@ pub struct PgRepository {
 
 impl PgRepository {
     /// Create a new repository with the given database connection.
+    #[must_use]
     pub fn new(conn: DBConn) -> Self {
         Self { conn }
     }
@@ -32,7 +33,7 @@ pub(crate) mod test {
         cell::Cell,
         collections::HashMap,
         fmt::{Display, Formatter},
-        ops::Deref,
+        mem::swap,
         sync::{Arc, Mutex},
     };
     use uuid::Uuid;
@@ -50,88 +51,111 @@ pub(crate) mod test {
 
     impl StdError for TestError {}
 
-    pub(crate) struct TestRepo {
+    pub(crate) struct TestRepoSource {
+        repo: Arc<Mutex<Cell<Option<TestRepoData>>>>,
+    }
+
+    impl TestRepoSource {
+        pub(crate) fn new() -> Self {
+            TestRepoSource {
+                repo: Arc::new(Mutex::new(Cell::new(Some(TestRepoData::new())))),
+            }
+        }
+    }
+
+    impl Source<TestRepo> for TestRepoSource {
+        fn get(&self) -> Option<TestRepo> {
+            let cell = self.repo.lock().expect("Failed to lock test repo source cell");
+            let data = cell.replace(None).expect("Test repo source cell was empty");
+
+            Some(TestRepo {
+                source_repo: Arc::clone(&self.repo),
+                data,
+            })
+        }
+    }
+
+    struct TestRepoData {
         health:   bool,
-        next_id:  Cell<i32>,
-        queues:   Cell<HashMap<String, Queue>>,
-        messages: Cell<HashMap<Uuid, Message>>,
+        next_id:  i32,
+        queues:   HashMap<String, Queue>,
+        messages: HashMap<Uuid, Message>,
+    }
+
+    pub(crate) struct TestRepo {
+        source_repo: Arc<Mutex<Cell<Option<TestRepoData>>>>,
+        data:        TestRepoData,
+    }
+
+    impl TestRepoData {
+        pub fn new() -> Self {
+            TestRepoData {
+                health:   true,
+                next_id:  1,
+                queues:   HashMap::new(),
+                messages: HashMap::new(),
+            }
+        }
     }
 
     impl TestRepo {
-        pub fn new() -> Self {
-            TestRepo {
-                health:   true,
-                next_id:  Cell::new(1),
-                queues:   Cell::new(HashMap::new()),
-                messages: Cell::new(HashMap::new()),
-            }
-        }
-
         pub fn set_health(&mut self, health: bool) {
-            self.health = health;
+            self.data.health = health;
         }
 
-        fn next_id(&self) -> i32 {
-            let id = self.next_id.get();
-            self.next_id.set(id + 1);
+        fn next_id(&mut self) -> i32 {
+            let id = self.data.next_id;
+            self.data.next_id = id + 1;
 
             id
         }
 
-        fn with_queues<R, F: FnOnce(&HashMap<String, Queue>) -> R>(&self, f: F) -> R {
-            self.with_queues_mut(|queues| f(queues))
-        }
+        fn get_hash_and_duplicate(&self, queue: &Queue, input: &MessageInput<'_>) -> (Option<String>, bool) {
+            if queue.content_based_deduplication {
+                let mut digest = Sha256::default();
+                digest.update(input.payload);
+                let result = base64::encode(digest.finalize().as_slice());
+                for message in self.data.messages.values() {
+                    if let Some(msg_hash) = &message.hash {
+                        if msg_hash == &result {
+                            return (None, true);
+                        }
+                    }
+                }
 
-        fn with_queues_mut<R, F: FnOnce(&mut HashMap<String, Queue>) -> R>(&self, f: F) -> R {
-            // not the fastest way, but this is only test code and like this we can avoid
-            // using unsafe code (which I prefer in tests)
-            let mut queues = self.queues.replace(HashMap::new());
-            let r = f(&mut queues);
-            self.queues.replace(queues);
-            r
+                (Some(result), false)
+            } else {
+                (None, false)
+            }
         }
+    }
 
-        fn with_messages<R, F: FnOnce(&HashMap<Uuid, Message>) -> R>(&self, f: F) -> R {
-            self.with_messages_mut(|messages| f(messages))
-        }
+    // when we are done with a test repo, we "commit" the data to the "database" by moving it back to
+    // the source and thus enable us to access the "database" another time with another task.
+    impl Drop for TestRepo {
+        fn drop(&mut self) {
+            let mut data = TestRepoData::new();
+            swap(&mut data, &mut self.data);
 
-        fn with_messages_mut<R, F: FnOnce(&mut HashMap<Uuid, Message>) -> R>(&self, f: F) -> R {
-            let mut messages = self.messages.replace(HashMap::new());
-            let r = f(&mut messages);
-            self.messages.replace(messages);
-            r
+            let cell = self.source_repo.lock().expect("Failed to lock test repo source cell");
+            let old_data = cell.replace(Some(data));
+            debug_assert!(
+                old_data.is_none(),
+                "There was already data in the test repo source cell"
+            )
         }
     }
 
     impl HealthCheckRepository for TestRepo {
-        fn check_health(&self) -> bool {
-            self.health
+        fn check_health(&mut self) -> bool {
+            self.data.health
         }
     }
 
     impl MessageRepository for TestRepo {
-        fn insert_message(&self, queue: &Queue, input: &MessageInput<'_>) -> QueryResult<bool> {
-            let mut found = false;
-            let hash = if queue.content_based_deduplication {
-                let mut digest = Sha256::default();
-                digest.update(input.payload);
-                let result = base64::encode(digest.finalize().as_slice());
-                self.with_messages(|messages| {
-                    for message in messages.values() {
-                        if let Some(msg_hash) = &message.hash {
-                            if msg_hash == &result {
-                                found = true;
-                                return None;
-                            }
-                        }
-                    }
-
-                    Some(result)
-                })
-            } else {
-                None
-            };
-            if found {
+        fn insert_message(&mut self, queue: &Queue, input: &MessageInput<'_>) -> QueryResult<bool> {
+            let (hash, has_duplicate) = self.get_hash_and_duplicate(queue, input);
+            if has_duplicate {
                 return Ok(false);
             }
             let now = UtcTime::now();
@@ -147,53 +171,49 @@ pub(crate) mod test {
                 created_at: now,
                 trace_id: None,
             };
-            self.with_messages_mut(|messages| messages.insert(message.id.clone(), message));
+            self.data.messages.insert(message.id.clone(), message);
 
             Ok(true)
         }
 
-        fn get_message_from_queue(&self, queue: &Queue, count: i64) -> QueryResult<Vec<Message>> {
+        fn get_message_from_queue(&mut self, queue: &Queue, count: i64) -> QueryResult<Vec<Message>> {
             let mut result: Vec<Message> = Vec::with_capacity(count as usize);
             let now = UtcTime::now();
 
-            self.with_messages_mut(|messages| {
-                for message in messages.values_mut() {
-                    if message.visible_since > now || &message.queue != &queue.name {
-                        continue;
-                    }
-
-                    message.receives += 1;
-                    message.visible_since = now.add_pg_interval(&queue.visibility_timeout);
-                    result.push(message.clone());
+            for message in self.data.messages.values_mut() {
+                if message.visible_since > now || &message.queue != &queue.name {
+                    continue;
                 }
-            });
+
+                message.receives += 1;
+                message.visible_since = now.add_pg_interval(&queue.visibility_timeout);
+                result.push(message.clone());
+            }
 
             Ok(result)
         }
 
-        fn move_message_to_queue(&self, ids: Vec<Uuid>, new_queue: &str) -> QueryResult<usize> {
+        fn move_message_to_queue(&mut self, ids: Vec<Uuid>, new_queue: &str) -> QueryResult<usize> {
             let mut modified = 0;
 
-            self.with_messages_mut(|messages| {
-                for id in ids {
-                    match messages.get_mut(&id) {
-                        None => {},
-                        Some(msg) => {
-                            msg.queue = new_queue.to_string();
-                            modified += 1;
-                        },
-                    }
+            for id in ids {
+                match self.data.messages.get_mut(&id) {
+                    None => {},
+                    Some(msg) => {
+                        msg.queue = new_queue.to_string();
+                        modified += 1;
+                    },
                 }
-            });
+            }
 
             Ok(modified)
         }
 
-        fn delete_message_by_id(&self, id: Uuid) -> QueryResult<bool> {
-            Ok(self.with_messages_mut(|messages| messages.remove(&id).is_some()))
+        fn delete_message_by_id(&mut self, id: Uuid) -> QueryResult<bool> {
+            Ok(self.data.messages.remove(&id).is_some())
         }
 
-        fn delete_messages_by_ids(&self, ids: Vec<Uuid>) -> QueryResult<usize> {
+        fn delete_messages_by_ids(&mut self, ids: Vec<Uuid>) -> QueryResult<usize> {
             let mut deleted = 0;
 
             for id in ids {
@@ -207,13 +227,13 @@ pub(crate) mod test {
     }
 
     impl QueueSource for TestRepo {
-        fn find_by_name(&self, name: &str) -> QueryResult<Option<Queue>> {
-            Ok(self.with_queues(|queues| queues.get(&name.to_string()).map(|queue| queue.clone())))
+        fn find_by_name(&mut self, name: &str) -> QueryResult<Option<Queue>> {
+            Ok(self.data.queues.get(&name.to_string()).map(|queue| queue.clone()))
         }
     }
 
     impl QueueRepository for TestRepo {
-        fn insert_queue(&self, queue: &QueueInput<'_>) -> QueryResult<Option<Queue>> {
+        fn insert_queue(&mut self, queue: &QueueInput<'_>) -> QueryResult<Option<Queue>> {
             if self.find_by_name(queue.name)?.is_some() {
                 return Ok(None);
             }
@@ -230,18 +250,16 @@ pub(crate) mod test {
                 created_at:                  now,
                 updated_at:                  now,
             };
-            self.with_queues_mut(|queues| {
-                queues.insert(queue.name.to_string(), queue.clone());
-            });
+            self.data.queues.insert(queue.name.to_string(), queue.clone());
 
             Ok(Some(queue))
         }
 
-        fn count_queues(&self) -> QueryResult<i64> {
-            Ok(self.with_queues(|queues| queues.len() as i64))
+        fn count_queues(&mut self) -> QueryResult<i64> {
+            Ok(self.data.queues.len() as i64)
         }
 
-        fn describe_queue(&self, name: &str) -> QueryResult<Option<QueueDescription>> {
+        fn describe_queue(&mut self, name: &str) -> QueryResult<Option<QueueDescription>> {
             let queue = self.find_by_name(name)?;
             if let Some(queue) = queue {
                 let mut messages_count = 0;
@@ -249,54 +267,50 @@ pub(crate) mod test {
                 let mut oldest_message_age = 0;
                 let now = UtcTime::now();
 
-                self.with_messages(|messages| {
-                    for message in messages.values() {
-                        if &message.queue != &queue.name {
-                            continue;
-                        }
-
-                        messages_count += 1;
-                        visible_messages += if message.visible_since <= now { 1 } else { 0 };
-                        if let Ok(message_age) = now.since(&message.created_at) {
-                            oldest_message_age = oldest_message_age.max(message_age.as_secs());
-                        }
+                for message in self.data.messages.values() {
+                    if &message.queue != &queue.name {
+                        continue;
                     }
 
-                    Ok(Some(QueueDescription {
-                        queue,
-                        messages: messages_count,
-                        visible_messages,
-                        oldest_message_age,
-                    }))
-                })
+                    messages_count += 1;
+                    visible_messages += if message.visible_since <= now { 1 } else { 0 };
+                    if let Ok(message_age) = now.since(&message.created_at) {
+                        oldest_message_age = oldest_message_age.max(message_age.as_secs());
+                    }
+                }
+
+                Ok(Some(QueueDescription {
+                    queue,
+                    messages: messages_count,
+                    visible_messages,
+                    oldest_message_age,
+                }))
             } else {
                 Ok(None)
             }
         }
 
-        fn list_queues(&self, offset: Option<i64>, limit: Option<i64>) -> QueryResult<Vec<Queue>> {
+        fn list_queues(&mut self, offset: Option<i64>, limit: Option<i64>) -> QueryResult<Vec<Queue>> {
             let mut skip = offset.unwrap_or(0);
-            let max = limit.unwrap_or(self.with_queues(|queues| queues.len() as i64)) as usize;
+            let max = limit.unwrap_or(self.data.queues.len() as i64) as usize;
             let mut result = Vec::with_capacity(max);
 
-            self.with_queues(|queues| {
-                for queue in queues.values() {
-                    if skip > 0 {
-                        skip -= 0;
-                        continue;
-                    }
-
-                    result.push(queue.clone());
-                    if result.len() == max {
-                        break;
-                    }
+            for queue in self.data.queues.values() {
+                if skip > 0 {
+                    skip -= 0;
+                    continue;
                 }
-            });
+
+                result.push(queue.clone());
+                if result.len() == max {
+                    break;
+                }
+            }
 
             Ok(result)
         }
 
-        fn update_queue(&self, queue: &QueueInput<'_>) -> QueryResult<Option<Queue>> {
+        fn update_queue(&mut self, queue: &QueueInput<'_>) -> QueryResult<Option<Queue>> {
             let old = self.find_by_name(queue.name)?;
             if let Some(old) = old {
                 let queue = Queue {
@@ -311,9 +325,7 @@ pub(crate) mod test {
                     created_at:                  old.created_at,
                     updated_at:                  UtcTime::now(),
                 };
-                self.with_queues_mut(|queues| {
-                    queues.insert(queue.name.to_string(), queue.clone());
-                });
+                self.data.queues.insert(queue.name.to_string(), queue.clone());
 
                 Ok(Some(queue))
             } else {
@@ -321,144 +333,8 @@ pub(crate) mod test {
             }
         }
 
-        fn delete_queue_by_name(&self, name: &str) -> QueryResult<Option<Queue>> {
-            Ok(self.with_queues_mut(|queues| queues.remove(name)))
-        }
-    }
-
-    pub(crate) struct CloneSource<R> {
-        repo: R,
-    }
-
-    impl<R: Clone> CloneSource<R> {
-        pub(crate) fn new(repo: &R) -> Self {
-            CloneSource { repo: repo.clone() }
-        }
-    }
-
-    impl<R: Clone + Send> Source<R> for CloneSource<R> {
-        fn get(&self) -> Option<R> {
-            Some(self.repo.clone())
-        }
-    }
-
-    impl<R: HealthCheckRepository + Sync> HealthCheckRepository for Arc<R> {
-        fn check_health(&self) -> bool {
-            self.deref().check_health()
-        }
-    }
-
-    impl<R: HealthCheckRepository> HealthCheckRepository for Mutex<R> {
-        fn check_health(&self) -> bool {
-            self.lock().unwrap().check_health()
-        }
-    }
-
-    impl<R: QueueSource + Sync> QueueSource for Arc<R> {
-        fn find_by_name(&self, name: &str) -> QueryResult<Option<Queue>> {
-            self.deref().find_by_name(name)
-        }
-    }
-
-    impl<R: QueueSource> QueueSource for Mutex<R> {
-        fn find_by_name(&self, name: &str) -> QueryResult<Option<Queue>> {
-            self.lock().unwrap().find_by_name(name)
-        }
-    }
-
-    impl<R: QueueRepository + Sync> QueueRepository for Arc<R> {
-        fn insert_queue(&self, queue: &QueueInput<'_>) -> QueryResult<Option<Queue>> {
-            self.deref().insert_queue(queue)
-        }
-
-        fn count_queues(&self) -> QueryResult<i64> {
-            self.deref().count_queues()
-        }
-
-        fn describe_queue(&self, name: &str) -> QueryResult<Option<QueueDescription>> {
-            self.deref().describe_queue(name)
-        }
-
-        fn list_queues(&self, offset: Option<i64>, limit: Option<i64>) -> QueryResult<Vec<Queue>> {
-            self.deref().list_queues(offset, limit)
-        }
-
-        fn update_queue(&self, queue: &QueueInput<'_>) -> QueryResult<Option<Queue>> {
-            self.deref().update_queue(queue)
-        }
-
-        fn delete_queue_by_name(&self, name: &str) -> QueryResult<Option<Queue>> {
-            self.deref().delete_queue_by_name(name)
-        }
-    }
-
-    impl<R: QueueRepository> QueueRepository for Mutex<R> {
-        fn insert_queue(&self, queue: &QueueInput<'_>) -> QueryResult<Option<Queue>> {
-            self.lock().unwrap().insert_queue(queue)
-        }
-
-        fn count_queues(&self) -> QueryResult<i64> {
-            self.lock().unwrap().count_queues()
-        }
-
-        fn describe_queue(&self, name: &str) -> QueryResult<Option<QueueDescription>> {
-            self.lock().unwrap().describe_queue(name)
-        }
-
-        fn list_queues(&self, offset: Option<i64>, limit: Option<i64>) -> QueryResult<Vec<Queue>> {
-            self.lock().unwrap().list_queues(offset, limit)
-        }
-
-        fn update_queue(&self, queue: &QueueInput<'_>) -> QueryResult<Option<Queue>> {
-            self.lock().unwrap().update_queue(queue)
-        }
-
-        fn delete_queue_by_name(&self, name: &str) -> QueryResult<Option<Queue>> {
-            self.lock().unwrap().delete_queue_by_name(name)
-        }
-    }
-
-    impl<R: MessageRepository + Sync> MessageRepository for Arc<R> {
-        fn insert_message(&self, queue: &Queue, input: &MessageInput<'_>) -> QueryResult<bool> {
-            self.deref().insert_message(queue, input)
-        }
-
-        fn get_message_from_queue(&self, queue: &Queue, count: i64) -> QueryResult<Vec<Message>> {
-            self.deref().get_message_from_queue(queue, count)
-        }
-
-        fn move_message_to_queue(&self, ids: Vec<Uuid>, new_queue: &str) -> QueryResult<usize> {
-            self.deref().move_message_to_queue(ids, new_queue)
-        }
-
-        fn delete_message_by_id(&self, id: Uuid) -> QueryResult<bool> {
-            self.deref().delete_message_by_id(id)
-        }
-
-        fn delete_messages_by_ids(&self, ids: Vec<Uuid>) -> QueryResult<usize> {
-            self.deref().delete_messages_by_ids(ids)
-        }
-    }
-
-    impl<R: MessageRepository> MessageRepository for Mutex<R> {
-        fn insert_message(&self, queue: &Queue, input: &MessageInput<'_>) -> QueryResult<bool> {
-            self.lock().unwrap().insert_message(queue, input)
-        }
-
-        fn get_message_from_queue(&self, queue: &Queue, count: i64) -> QueryResult<Vec<Message>> {
-            self.lock().unwrap().get_message_from_queue(queue, count)
-        }
-
-        fn move_message_to_queue(&self, ids: Vec<Uuid>, new_queue: &str) -> QueryResult<usize> {
-            self.lock().unwrap().move_message_to_queue(ids, new_queue)
-        }
-
-        fn delete_message_by_id(&self, id: Uuid) -> QueryResult<bool> {
-            self.lock().unwrap().delete_message_by_id(id)
-        }
-
-        fn delete_messages_by_ids(&self, ids: Vec<Uuid>) -> QueryResult<usize> {
-            self.lock().unwrap().delete_messages_by_ids(ids)
+        fn delete_queue_by_name(&mut self, name: &str) -> QueryResult<Option<Queue>> {
+            Ok(self.data.queues.remove(name))
         }
     }
 }

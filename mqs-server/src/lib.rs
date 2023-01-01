@@ -1,4 +1,3 @@
-#![feature(in_band_lifetimes)]
 #![warn(
     missing_docs,
     rust_2018_idioms,
@@ -14,8 +13,6 @@
 
 //! Server definitions and implementation.
 
-#[macro_use]
-extern crate diesel;
 #[macro_use]
 extern crate log;
 #[macro_use]

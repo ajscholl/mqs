@@ -41,17 +41,14 @@ impl<Args> FnOnce<Args> for NewJsonLogger {
 impl<Args> Fn<Args> for NewJsonLogger {
     extern "rust-call" fn call(&self, _args: Args) -> Self::Output {
         let w = stdout();
-        let l = match env::var("LOG_LEVEL") {
-            Err(_) => self.default_log_level,
-            Ok(s) => match s.borrow() {
-                "trace" => Level::Trace,
-                "debug" => Level::Debug,
-                "info" => Level::Info,
-                "warn" => Level::Warn,
-                "error" => Level::Error,
-                _ => self.default_log_level,
-            },
-        };
+        let l = env::var("LOG_LEVEL").map_or(self.default_log_level, |s| match s.borrow() {
+            "trace" => Level::Trace,
+            "debug" => Level::Debug,
+            "info" => Level::Info,
+            "warn" => Level::Warn,
+            "error" => Level::Error,
+            _ => self.default_log_level,
+        });
 
         Logger::new(l, w)
     }

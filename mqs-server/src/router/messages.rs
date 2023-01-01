@@ -28,28 +28,26 @@ impl<R: MessageRepository + QueueRepository, S: Source<R>> Handler<(R, S)> for R
     {
         let message_count = {
             let header_value = get_header(req.headers(), HeaderName::from_static("x-mqs-max-messages"));
-            header_value.map_or(Ok(MessageCount(1)), |max_messages| match max_messages.parse() {
-                Err(_) => Err(()),
-                Ok(n) => {
+            header_value.map_or(Ok(MessageCount(1)), |max_messages| {
+                max_messages.parse().map_or(Err(()), |n| {
                     if n > 0 && n < 1000 {
                         Ok(MessageCount(n))
                     } else {
                         Err(())
                     }
-                },
+                })
             })
         };
         let max_wait_time = {
             let header_value = get_header(req.headers(), HeaderName::from_static("x-mqs-max-wait-time"));
-            header_value.map_or(Ok(None), |max_wait_time| match max_wait_time.parse() {
-                Err(_) => Err(()),
-                Ok(n) => {
+            header_value.map_or(Ok(None), |max_wait_time| {
+                max_wait_time.parse().map_or(Err(()), |n| {
                     if n > 0 && n < 20 {
                         Ok(Some(MaxWaitTime(n)))
                     } else {
                         Err(())
                     }
-                },
+                })
             })
         };
         receive(repo, repo_source, &self.queue_name, message_count, max_wait_time)
@@ -78,11 +76,11 @@ impl<R: MessageRepository + QueueRepository, S: Send> Handler<(R, S)> for Publis
 
 #[async_trait]
 impl<R: MessageRepository, S: Send> Handler<(R, S)> for DeleteMessageHandler {
-    async fn handle(&self, (repo, _): (R, S), _req: Request<Body>, _body: Vec<u8>) -> Response<Body>
+    async fn handle(&self, (mut repo, _): (R, S), _req: Request<Body>, _body: Vec<u8>) -> Response<Body>
     where
         R: 'async_trait,
         S: 'async_trait,
     {
-        delete(&repo, &self.message_id).into_response()
+        delete(&mut repo, &self.message_id).into_response()
     }
 }

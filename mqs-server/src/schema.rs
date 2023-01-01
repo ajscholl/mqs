@@ -1,4 +1,6 @@
-table! {
+// @generated automatically by Diesel CLI.
+
+diesel::table! {
     messages (id) {
         id -> Uuid,
         payload -> Bytea,
@@ -13,7 +15,7 @@ table! {
     }
 }
 
-table! {
+diesel::table! {
     queues (id) {
         id -> Int4,
         name -> Varchar,
@@ -28,7 +30,7 @@ table! {
     }
 }
 
-allow_tables_to_appear_in_same_query!(
+diesel::allow_tables_to_appear_in_same_query!(
     messages,
     queues,
 );

@@ -1,4 +1,4 @@
-#![feature(unboxed_closures, fn_traits, in_band_lifetimes)]
+#![feature(unboxed_closures, fn_traits)]
 #![warn(
     missing_docs,
     rust_2018_idioms,
@@ -56,10 +56,13 @@ impl MessageIdHeader {
     /// use hyper::header::HeaderName;
     /// use mqs_common::MessageIdHeader;
     ///
-    /// assert_eq!(HeaderName::from_static("x-mqs-message-id"), MessageIdHeader::name());
+    /// assert_eq!(
+    ///     HeaderName::from_static("x-mqs-message-id"),
+    ///     MessageIdHeader::name()
+    /// );
     /// ```
     #[must_use]
-    pub fn name() -> HeaderName {
+    pub const fn name() -> HeaderName {
         HeaderName::from_static("x-mqs-message-id")
     }
 
@@ -72,7 +75,10 @@ impl MessageIdHeader {
     ///
     /// let mut headers = HeaderMap::new();
     /// assert_eq!(MessageIdHeader::get(&headers), "".to_string());
-    /// headers.insert(MessageIdHeader::name(), HeaderValue::from_static("my value"));
+    /// headers.insert(
+    ///     MessageIdHeader::name(),
+    ///     HeaderValue::from_static("my value"),
+    /// );
     /// assert_eq!(MessageIdHeader::get(&headers), "my value".to_string());
     /// ```
     #[must_use]
@@ -98,7 +104,7 @@ impl MessageReceivesHeader {
     /// );
     /// ```
     #[must_use]
-    pub fn name() -> HeaderName {
+    pub const fn name() -> HeaderName {
         HeaderName::from_static("x-mqs-message-receives")
     }
 
@@ -112,9 +118,15 @@ impl MessageReceivesHeader {
     ///
     /// let mut headers = HeaderMap::new();
     /// assert_eq!(MessageReceivesHeader::get(&headers), 0);
-    /// headers.insert(MessageReceivesHeader::name(), HeaderValue::from_static("not a number"));
+    /// headers.insert(
+    ///     MessageReceivesHeader::name(),
+    ///     HeaderValue::from_static("not a number"),
+    /// );
     /// assert_eq!(MessageReceivesHeader::get(&headers), 0);
-    /// headers.insert(MessageReceivesHeader::name(), HeaderValue::from_static("42"));
+    /// headers.insert(
+    ///     MessageReceivesHeader::name(),
+    ///     HeaderValue::from_static("42"),
+    /// );
     /// assert_eq!(MessageReceivesHeader::get(&headers), 42);
     /// ```
     #[must_use]
@@ -140,7 +152,7 @@ impl PublishedAtHeader {
     /// );
     /// ```
     #[must_use]
-    pub fn name() -> HeaderName {
+    pub const fn name() -> HeaderName {
         HeaderName::from_static("x-mqs-message-published-at")
     }
 
@@ -153,12 +165,18 @@ impl PublishedAtHeader {
     /// use mqs_common::{PublishedAtHeader, UtcTime};
     ///
     /// let mut headers = HeaderMap::new();
-    /// assert_eq!(PublishedAtHeader::get(&headers), PublishedAtHeader::default());
+    /// assert_eq!(
+    ///     PublishedAtHeader::get(&headers),
+    ///     PublishedAtHeader::default()
+    /// );
     /// headers.insert(
     ///     PublishedAtHeader::name(),
     ///     HeaderValue::from_static("today is not a valid date"),
     /// );
-    /// assert_eq!(PublishedAtHeader::get(&headers), PublishedAtHeader::default());
+    /// assert_eq!(
+    ///     PublishedAtHeader::get(&headers),
+    ///     PublishedAtHeader::default()
+    /// );
     /// headers.insert(
     ///     PublishedAtHeader::name(),
     ///     HeaderValue::from_static("1984-04-04T00:00:00Z"),
@@ -179,7 +197,10 @@ impl PublishedAtHeader {
     /// ```
     /// use mqs_common::PublishedAtHeader;
     ///
-    /// assert_eq!("1970-01-01T00:00:00Z", PublishedAtHeader::default().to_rfc3339());
+    /// assert_eq!(
+    ///     "1970-01-01T00:00:00Z",
+    ///     PublishedAtHeader::default().to_rfc3339()
+    /// );
     /// ```
     #[must_use]
     pub fn default() -> UtcTime {
@@ -204,7 +225,7 @@ impl VisibleAtHeader {
     /// );
     /// ```
     #[must_use]
-    pub fn name() -> HeaderName {
+    pub const fn name() -> HeaderName {
         HeaderName::from_static("x-mqs-message-visible-at")
     }
 
@@ -243,7 +264,10 @@ impl VisibleAtHeader {
     /// ```
     /// use mqs_common::VisibleAtHeader;
     ///
-    /// assert_eq!("1970-01-01T00:00:00Z", VisibleAtHeader::default().to_rfc3339());
+    /// assert_eq!(
+    ///     "1970-01-01T00:00:00Z",
+    ///     VisibleAtHeader::default().to_rfc3339()
+    /// );
     /// ```
     #[must_use]
     pub fn default() -> UtcTime {
@@ -265,7 +289,7 @@ impl TraceIdHeader {
     /// assert_eq!(HeaderName::from_static("x-trace-id"), TraceIdHeader::name());
     /// ```
     #[must_use]
-    pub fn name() -> HeaderName {
+    pub const fn name() -> HeaderName {
         HeaderName::from_static("x-trace-id")
     }
 

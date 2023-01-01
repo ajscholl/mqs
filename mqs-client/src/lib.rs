@@ -516,7 +516,9 @@ impl Service {
     ///         None => Ok(false),
     ///         Some(msg) => {
     ///             callback(msg.content_type, msg.content_encoding, msg.content);
-    ///             service.delete_message(msg.trace_id, &msg.message_id).await?;
+    ///             service
+    ///                 .delete_message(msg.trace_id, &msg.message_id)
+    ///                 .await?;
     ///             Ok(true)
     ///         },
     ///     }
@@ -580,7 +582,9 @@ impl Service {
     ///     let mut count = 0;
     ///     for msg in service.get_messages(queue_name, 20, Some(10)).await? {
     ///         callback(msg.content_type, msg.content_encoding, msg.content);
-    ///         service.delete_message(msg.trace_id, &msg.message_id).await?;
+    ///         service
+    ///             .delete_message(msg.trace_id, &msg.message_id)
+    ///             .await?;
     ///         count += 1;
     ///     }
     ///
@@ -760,7 +764,9 @@ impl Service {
     ///         let messages = service.get_messages(queue_name, 10, Some(20)).await?;
     ///         for msg in messages {
     ///             callback(msg.content_type, msg.content_encoding, msg.content);
-    ///             service.delete_message(msg.trace_id, &msg.message_id).await?;
+    ///             service
+    ///                 .delete_message(msg.trace_id, &msg.message_id)
+    ///                 .await?;
     ///         }
     ///     }
     /// }

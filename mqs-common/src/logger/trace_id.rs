@@ -28,10 +28,7 @@ task_local!(
 /// ```
 #[must_use]
 pub fn get_trace_id() -> Option<Uuid> {
-    match TRACE_ID.try_with(|trace_id| *trace_id) {
-        Err(_) => None,
-        Ok(trace_id) => Some(trace_id),
-    }
+    TRACE_ID.try_with(|trace_id| *trace_id).ok()
 }
 
 /// Execute the given future with the trace id set to the given value. The trace id will be cleared after

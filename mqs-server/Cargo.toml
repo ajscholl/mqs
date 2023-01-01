@@ -9,44 +9,44 @@ path = "../mqs-common"
 features = ["diesel", "server"]
 
 [dependencies.async-trait]
-version = "0.1.53"
+version = "0.1.60"
 
 [dependencies.base64]
-version = "0.13.0"
+version = "0.20.0"
 
 [dependencies.cached]
-version = "0.34.0"
+version = "0.41.0"
 
 [dependencies.diesel]
-version = "1.4.8"
-features = ["postgres", "uuidv07"]
+version = "2.0.2"
+features = ["postgres", "uuid"]
 
 [dependencies.hyper]
-version = "=0.14.18"
+version = "=0.14.22"
 features = ["server", "http1", "http2", "runtime"]
 
 [dependencies.tokio]
-version = "1.17.0"
+version = "1.23.0"
 features = ["rt", "rt-multi-thread", "sync", "net", "time", "signal"]
 
 [dependencies.log]
-version = "0.4.16"
+version = "0.4.17"
 
 [dependencies.sha2]
-version = "0.10.2"
+version = "0.10.6"
 
 [dependencies.serde]
-version = "1.0.136"
+version = "1.0.152"
 
 [dependencies.serde_derive]
-version = "1.0.136"
+version = "1.0.152"
 
 [dependencies.serde_json]
-version = "1.0.79"
+version = "1.0.91"
 
 [dependencies.uuid]
-version = "0.8.2"
+version = "1.2.2"
 features = ["serde", "v4"]
 
 [dependencies.url]
-version = "2.2.2"
+version = "2.3.1"

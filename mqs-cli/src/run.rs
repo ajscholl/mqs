@@ -38,18 +38,18 @@ fn print_json<T: ?Sized + Serialize>(json: &T) {
 }
 
 fn print_opt_queue_config<T: Sized + Serialize, F: FnOnce() -> String>(response: Option<T>, mk_error: F) -> i32 {
-    match response {
-        None => {
+    response.map_or_else(
+        || {
             print_json(&ErrorStruct { err: mk_error() });
 
             2
         },
-        Some(response) => {
+        |response| {
             print_json(&response);
 
             0
         },
-    }
+    )
 }
 
 fn print_messages(messages: Vec<MessageResponse>) {
@@ -129,10 +129,7 @@ async fn run_command_for_result(
             let published = s
                 .publish_message(&queue_name, PublishableMessage {
                     content_type: &message.content_type,
-                    content_encoding: match &message.content_encoding {
-                        None => None,
-                        Some(s) => Some(s),
-                    },
+                    content_encoding: message.content_encoding.as_deref(),
                     trace_id,
                     message: message.message,
                 })

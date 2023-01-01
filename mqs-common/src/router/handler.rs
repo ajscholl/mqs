@@ -31,14 +31,26 @@ use crate::{read_body, router::Router, Status};
 ///
 /// #[async_trait]
 /// impl Handler<(i32, IntSource)> for ExampleHandler {
-///     async fn handle(&self, args: (i32, IntSource), req: Request<Body>, body: Vec<u8>) -> Response<Body> {
+///     async fn handle(
+///         &self,
+///         args: (i32, IntSource),
+///         req: Request<Body>,
+///         body: Vec<u8>,
+///     ) -> Response<Body> {
 ///         Response::new(Body::from(format!("{} -> {}", args.0, args.1.int)))
 ///     }
 /// }
 ///
 /// make_runtime().block_on(async {
 ///     let router = Router::new_simple(Method::GET, ExampleHandler {});
-///     let mut response = handle(None, IntSource { int: 5 }, &router, 100, Request::new(Body::default())).await;
+///     let mut response = handle(
+///         None,
+///         IntSource { int: 5 },
+///         &router,
+///         100,
+///         Request::new(Body::default()),
+///     )
+///     .await;
 ///     assert_eq!(response.status(), 503);
 ///     assert_eq!(
 ///         read_body(response.body_mut(), None).await.unwrap().unwrap(),
@@ -53,7 +65,10 @@ use crate::{read_body, router::Router, Status};
 ///     )
 ///     .await;
 ///     assert_eq!(response.status(), 200);
-///     assert_eq!(read_body(response.body_mut(), None).await.unwrap().unwrap(), b"42 -> 5");
+///     assert_eq!(
+///         read_body(response.body_mut(), None).await.unwrap().unwrap(),
+///         b"42 -> 5"
+///     );
 /// });
 /// ```
 pub async fn handle<T: Send, S: Send>(

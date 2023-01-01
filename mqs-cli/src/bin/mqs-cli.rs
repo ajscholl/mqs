@@ -19,7 +19,7 @@ fn main() {
                 .enable_all()
                 .build()
                 .expect("Failed to create async runtime");
-            rt.block_on(run_command(&host, port, trace_id, cmd))
+            rt.block_on(run_command(&host, port, trace_id, *cmd))
         },
     };
 

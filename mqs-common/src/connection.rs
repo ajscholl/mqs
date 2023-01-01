@@ -1,4 +1,4 @@
-use diesel::pg::PgConnection;
+use diesel::{pg::PgConnection, r2d2::ConnectionManager};
 use r2d2::{
     self,
     event::{AcquireEvent, CheckinEvent, CheckoutEvent, ReleaseEvent, TimeoutEvent},
@@ -8,7 +8,6 @@ use r2d2::{
     HandleEvent,
     PooledConnection,
 };
-use r2d2_diesel::ConnectionManager;
 use std::{
     env,
     fmt::{Display, Formatter},
@@ -158,6 +157,15 @@ impl<E: Display> HandleError<E> for ConnectionHandler {
 pub trait Source<R>: Send {
     /// Get a resource from a `Source`.
     fn get(&self) -> Option<R>;
+}
+
+impl<'a, R, T: Source<R>> Source<R> for &'a T
+where
+    &'a T: Send,
+{
+    fn get(&self) -> Option<R> {
+        (*self).get()
+    }
 }
 
 #[cfg(test)]

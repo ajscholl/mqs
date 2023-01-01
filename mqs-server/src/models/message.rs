@@ -23,7 +23,7 @@ pub struct MessageInput<'a> {
 }
 
 #[derive(Insertable)]
-#[table_name = "messages"]
+#[diesel(table_name = messages)]
 pub struct NewMessage<'a> {
     pub id:               Uuid,
     pub payload:          &'a [u8],
@@ -37,7 +37,7 @@ pub struct NewMessage<'a> {
     pub trace_id:         Option<Uuid>,
 }
 
-#[derive(Queryable, Associations, Identifiable, Serialize, Debug, Clone)]
+#[derive(Queryable, Identifiable, Serialize, Debug, Clone)]
 pub struct Message {
     pub id:               Uuid,
     pub payload:          Vec<u8>,
@@ -52,15 +52,15 @@ pub struct Message {
 }
 
 pub trait MessageRepository: Send {
-    fn insert_message(&self, queue: &Queue, input: &MessageInput<'_>) -> QueryResult<bool>;
-    fn get_message_from_queue(&self, queue: &Queue, count: i64) -> QueryResult<Vec<Message>>;
-    fn move_message_to_queue(&self, ids: Vec<Uuid>, new_queue: &str) -> QueryResult<usize>;
-    fn delete_message_by_id(&self, id: Uuid) -> QueryResult<bool>;
-    fn delete_messages_by_ids(&self, ids: Vec<Uuid>) -> QueryResult<usize>;
+    fn insert_message(&mut self, queue: &Queue, input: &MessageInput<'_>) -> QueryResult<bool>;
+    fn get_message_from_queue(&mut self, queue: &Queue, count: i64) -> QueryResult<Vec<Message>>;
+    fn move_message_to_queue(&mut self, ids: Vec<Uuid>, new_queue: &str) -> QueryResult<usize>;
+    fn delete_message_by_id(&mut self, id: Uuid) -> QueryResult<bool>;
+    fn delete_messages_by_ids(&mut self, ids: Vec<Uuid>) -> QueryResult<usize>;
 }
 
 impl MessageRepository for PgRepository {
-    fn insert_message(&self, queue: &Queue, input: &MessageInput<'_>) -> QueryResult<bool> {
+    fn insert_message(&mut self, queue: &Queue, input: &MessageInput<'_>) -> QueryResult<bool> {
         let now = UtcTime::now();
         let visible_since = now.add_pg_interval(&queue.message_delay);
         let id = Uuid::new_v4();
@@ -85,7 +85,7 @@ impl MessageRepository for PgRepository {
                 created_at: now,
                 trace_id: input.trace_id,
             })
-            .execute(&*self.conn);
+            .execute(&mut self.conn);
         match result {
             Ok(_) => Ok(true),
             Err(Error::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => Ok(false),
@@ -93,7 +93,7 @@ impl MessageRepository for PgRepository {
         }
     }
 
-    fn get_message_from_queue(&self, queue: &Queue, count: i64) -> QueryResult<Vec<Message>> {
+    fn get_message_from_queue(&mut self, queue: &Queue, count: i64) -> QueryResult<Vec<Message>> {
         let now = UtcTime::now();
         let visible_since = now.add_pg_interval(&queue.visibility_timeout);
 
@@ -105,7 +105,7 @@ impl MessageRepository for PgRepository {
             .filter(In::new(messages::id, MessageIdsForFetch::new(&queue.name, now, count)))
             .returning(messages::all_columns);
 
-        let messages: Vec<Message> = update_query.get_results(&*self.conn)?;
+        let messages: Vec<Message> = update_query.get_results(&mut self.conn)?;
 
         // filter result, move messages to dead letter queues
         let mut result = Vec::with_capacity(messages.len());
@@ -140,68 +140,65 @@ impl MessageRepository for PgRepository {
         Ok(result)
     }
 
-    fn move_message_to_queue(&self, ids: Vec<Uuid>, new_queue: &str) -> QueryResult<usize> {
+    fn move_message_to_queue(&mut self, ids: Vec<Uuid>, new_queue: &str) -> QueryResult<usize> {
         diesel::dsl::update(messages::table)
             .set((messages::queue.eq(new_queue), messages::receives.eq(0)))
             .filter(messages::id.eq_any(ids))
-            .execute(&*self.conn)
+            .execute(&mut self.conn)
     }
 
-    fn delete_message_by_id(&self, id: Uuid) -> QueryResult<bool> {
+    fn delete_message_by_id(&mut self, id: Uuid) -> QueryResult<bool> {
         diesel::delete(messages::table.filter(messages::id.eq(id)))
-            .execute(&*self.conn)
+            .execute(&mut self.conn)
             .map(|count| count > 0)
     }
 
-    fn delete_messages_by_ids(&self, ids: Vec<Uuid>) -> QueryResult<usize> {
-        diesel::delete(messages::table.filter(messages::id.eq_any(ids))).execute(&*self.conn)
+    fn delete_messages_by_ids(&mut self, ids: Vec<Uuid>) -> QueryResult<usize> {
+        diesel::delete(messages::table.filter(messages::id.eq_any(ids))).execute(&mut self.conn)
     }
 }
 
-struct MessageIdsForFetch<'a> {
-    queue_name:    &'a str,
-    visible_since: UtcTime,
-    count:         i64,
+struct MessageIdsForFetch {
+    sub_query: Box<dyn QueryFragment<Pg>>,
 }
 
-impl<'a> MessageIdsForFetch<'a> {
-    const fn new(queue_name: &'a str, visible_since: UtcTime, count: i64) -> Self {
+impl MessageIdsForFetch {
+    fn new(queue_name: &str, visible_since: UtcTime, count: i64) -> Self {
         Self {
-            queue_name,
-            visible_since,
-            count,
+            // select all elements which are currently visible, take the first elements visible
+            // and limit to the maximum number of elements we want to process.
+            // skip any locked elements and lock our elements for update.
+            sub_query: Box::new(
+                messages::table
+                    .select(messages::id)
+                    .filter(
+                        messages::queue
+                            .eq(queue_name.to_string())
+                            .and(messages::visible_since.le(visible_since)),
+                    )
+                    .order(messages::visible_since.asc())
+                    .for_update()
+                    .skip_locked()
+                    .limit(count),
+            ),
         }
     }
 }
 
-impl<'a> QueryFragment<Pg> for MessageIdsForFetch<'a> {
-    fn walk_ast(&self, mut out: AstPass<'_, Pg>) -> QueryResult<()> {
-        // select all elements which are currently visible, take the first elements visible
-        // and limit to the maximum number of elements we want to process.
-        // skip any locked elements and lock our elements for update.
-        let sub_query = messages::table
-            .select(messages::id)
-            .filter(
-                messages::queue
-                    .eq(self.queue_name)
-                    .and(messages::visible_since.le(self.visible_since)),
-            )
-            .order(messages::visible_since.asc())
-            .for_update()
-            .skip_locked()
-            .limit(self.count);
+impl QueryFragment<Pg> for MessageIdsForFetch {
+    fn walk_ast<'b>(&'b self, mut out: AstPass<'_, 'b, Pg>) -> QueryResult<()> {
         out.push_sql("(");
-        sub_query.walk_ast(out.reborrow())?;
+        self.sub_query.walk_ast(out.reborrow())?;
         out.push_sql(")");
         Ok(())
     }
 }
 
-impl<'a> Expression for MessageIdsForFetch<'a> {
+impl Expression for MessageIdsForFetch {
     type SqlType = <messages::columns::id as Expression>::SqlType;
 }
 
-impl<'a> AppearsOnTable<messages::table> for MessageIdsForFetch<'a> {}
+impl AppearsOnTable<messages::table> for MessageIdsForFetch {}
 
 struct In<F, V> {
     field:  F,
@@ -228,7 +225,7 @@ where
     F: QueryFragment<DB>,
     V: QueryFragment<DB>,
 {
-    fn walk_ast(&self, mut out: AstPass<'_, DB>) -> QueryResult<()> {
+    fn walk_ast<'b>(&'b self, mut out: AstPass<'_, 'b, DB>) -> QueryResult<()> {
         self.field.walk_ast(out.reborrow())?;
         out.push_sql(" IN ");
         self.values.walk_ast(out.reborrow())?;

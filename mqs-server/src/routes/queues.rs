@@ -9,7 +9,7 @@ use crate::{
 };
 
 pub fn new<R: QueueRepository>(
-    repo: &R,
+    repo: &mut R,
     queue_name: &str,
     params: Result<QueueConfig, serde_json::Error>,
 ) -> MqsResponse {
@@ -42,7 +42,7 @@ pub fn new<R: QueueRepository>(
 }
 
 pub fn update<R: QueueRepository>(
-    repo: &R,
+    repo: &mut R,
     queue_name: &str,
     params: Result<QueueConfig, serde_json::Error>,
 ) -> MqsResponse {
@@ -74,7 +74,7 @@ pub fn update<R: QueueRepository>(
     }
 }
 
-pub fn delete<R: QueueRepository>(repo: &R, queue_name: &str) -> MqsResponse {
+pub fn delete<R: QueueRepository>(repo: &mut R, queue_name: &str) -> MqsResponse {
     info!("Deleting queue {}", queue_name);
     let deleted = repo.delete_queue_by_name(queue_name);
     match deleted {
@@ -83,7 +83,7 @@ pub fn delete<R: QueueRepository>(repo: &R, queue_name: &str) -> MqsResponse {
             MqsResponse::json(&queue.into_config_output())
         },
         Ok(None) => {
-            info!("Queue {} was not found", queue_name);
+            info!("Queue {} wasp not found", queue_name);
             MqsResponse::status(Status::NotFound)
         },
         Err(err) => {
@@ -122,7 +122,7 @@ impl TryFrom<&Request<Body>> for Range {
     }
 }
 
-fn list_queues_and_count<R: QueueRepository>(repo: &R, range: &Range) -> QueryResult<QueuesResponse> {
+fn list_queues_and_count<R: QueueRepository>(repo: &mut R, range: &Range) -> QueryResult<QueuesResponse> {
     let queues = repo.list_queues(range.offset, range.limit)?;
     let total = repo.count_queues()?;
     Ok(QueuesResponse {
@@ -131,7 +131,7 @@ fn list_queues_and_count<R: QueueRepository>(repo: &R, range: &Range) -> QueryRe
     })
 }
 
-pub fn list<R: QueueRepository>(repo: &R, range: Result<Range, String>) -> MqsResponse {
+pub fn list<R: QueueRepository>(repo: &mut R, range: Result<Range, String>) -> MqsResponse {
     match range {
         Err(err) => MqsResponse::error_owned(&err),
         Ok(range) => match list_queues_and_count(repo, &range) {
@@ -148,7 +148,7 @@ pub fn list<R: QueueRepository>(repo: &R, range: Result<Range, String>) -> MqsRe
     }
 }
 
-pub fn describe<R: QueueRepository>(repo: &R, queue_name: &str) -> MqsResponse {
+pub fn describe<R: QueueRepository>(repo: &mut R, queue_name: &str) -> MqsResponse {
     match repo.describe_queue(queue_name) {
         Err(err) => {
             error!("Failed to describe queue {}: {}", queue_name, err);

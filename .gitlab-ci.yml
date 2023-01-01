@@ -9,8 +9,8 @@ stages:
 - publish
 
 variables:
-  # 1.61.0, but we still need the nightly channel for most of our cargo fmt options
-  RUST_VERSION: nightly-2022-02-23
+  # 1.66.0, but we still need the nightly channel for most of our cargo fmt options
+  RUST_VERSION: nightly-2022-09-22
 
 .template:rust:
   image: rust:1.59.0-buster
