@@ -13,6 +13,11 @@ version = "1.4.3"
 [dependencies.cached]
 version = "0.41.0"
 
+[dependencies.chrono]
+version = "0.4.23"
+features = ["serde"]
+optional = true
+
 [dependencies.diesel]
 version = "2.0.2"
 features = ["postgres", "r2d2"]
@@ -58,4 +63,4 @@ version = "1.2.2"
 features = ["serde", "v4"]
 
 [features]
-server = ["dotenv", "r2d2"]
+server = ["chrono", "dotenv", "r2d2"]

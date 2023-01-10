@@ -2,6 +2,8 @@ use ::time::{error::ComponentRange, Date, Month, PrimitiveDateTime, Time};
 #[cfg(feature = "diesel")]
 use byteorder::{NetworkEndian, WriteBytesExt};
 use cached::once_cell::sync::Lazy;
+#[cfg(feature = "chrono")]
+use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 #[cfg(feature = "diesel")]
 use diesel::{
     data_types::{PgInterval, PgTimestamp},
@@ -319,6 +321,27 @@ impl UtcTime {
     }
 }
 
+#[cfg(feature = "chrono")]
+impl Into<DateTime<Utc>> for UtcTime {
+    fn into(self) -> DateTime<Utc> {
+        let date = {
+            let year = self.time.year();
+            let month = self.time.month() as u8;
+            let day = self.time.day();
+
+            NaiveDate::from_ymd_opt(year, u32::from(month), u32::from(day))
+                .expect("Failed to convert between different dates")
+        };
+        let time = {
+            let (h, m, s, nano) = self.time.time().as_hms_nano();
+
+            NaiveTime::from_hms_nano_opt(u32::from(h), u32::from(m), u32::from(s), nano)
+                .expect("Failed to convert between different times")
+        };
+        DateTime::from_utc(NaiveDateTime::new(date, time), Utc)
+    }
+}
+
 #[cfg(feature = "diesel")]
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct UtcTimeSqlConversionError(TryFromIntError);
@@ -474,5 +497,16 @@ mod test {
                 .to_rfc3339_nanos(),
             "2000-01-01T00:00:00.100000000Z"
         );
+    }
+
+    #[cfg(feature = "chrono")]
+    #[test]
+    async fn to_chrono() {
+        use chrono::{DateTime, Utc};
+
+        let now = UtcTime::now();
+        let chrono_now: DateTime<Utc> = now.into();
+
+        assert_eq!(chrono_now.to_rfc3339().replace("+00:00", "Z"), now.to_rfc3339_nanos());
     }
 }
